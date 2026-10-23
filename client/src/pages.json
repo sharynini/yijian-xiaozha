@@ -1,0 +1,99 @@
+{
+  "easycom": {
+    "autoscan": true
+  },
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "今日推荐"
+      }
+    },
+    {
+      "path": "pages/item/list",
+      "style": {
+        "navigationBarTitleText": "我的衣橱",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/item/add",
+      "style": {
+        "navigationBarTitleText": "添加衣物"
+      }
+    },
+    {
+      "path": "pages/outfit/select",
+      "style": {
+        "navigationBarTitleText": "选择今日穿搭"
+      }
+    },
+    {
+      "path": "pages/diary/create",
+      "style": {
+        "navigationBarTitleText": "轻量日记"
+      }
+    },
+    {
+      "path": "pages/timeline/index",
+      "style": {
+        "navigationBarTitleText": "穿搭时间轴",
+        "enablePullDownRefresh": true
+      }
+    },
+    {
+      "path": "pages/diary/edit",
+      "style": {
+        "navigationBarTitleText": "编辑日记"
+      }
+    },
+    {
+      "path": "pages/mine/index",
+      "style": {
+        "navigationBarTitleText": "我的"
+      }
+    },
+    {
+      "path": "pages/login/login",
+      "style": {
+        "navigationBarTitleText": "登录"
+      }
+    },
+    {
+      "path": "pages/register/register",
+      "style": {
+        "navigationBarTitleText": "注册"
+      }
+    }
+  ],
+  "tabBar": {
+    "color": "#8a94a6",
+    "selectedColor": "#5b8def",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页"
+      },
+      {
+        "pagePath": "pages/item/list",
+        "text": "衣橱"
+      },
+      {
+        "pagePath": "pages/timeline/index",
+        "text": "时间轴"
+      },
+      {
+        "pagePath": "pages/mine/index",
+        "text": "我的"
+      }
+    ]
+  },
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "智能衣橱",
+    "navigationBarBackgroundColor": "#ffffff",
+    "backgroundColor": "#f4f7fb"
+  }
+}

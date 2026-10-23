@@ -1,0 +1,24 @@
+{
+  "name": "smart-wardrobe-client",
+  "version": "1.0.0",
+  "description": "智能衣橱 + 轻量穿搭日记（uni-app + Vue3）",
+  "scripts": {
+    "dev:h5": "uni",
+    "dev:mp-weixin": "uni -p mp-weixin",
+    "build:h5": "uni build",
+    "build:mp-weixin": "uni build -p mp-weixin"
+  },
+  "dependencies": {
+    "@dcloudio/uni-app": "vue3",
+    "@dcloudio/uni-components": "vue3",
+    "@dcloudio/uni-h5": "vue3",
+    "@dcloudio/uni-mp-weixin": "vue3",
+    "pinia": "^2.1.7",
+    "vue": "^3.4.21"
+  },
+  "devDependencies": {
+    "@dcloudio/uni-automator": "vue3",
+    "@dcloudio/vite-plugin-uni": "vue3",
+    "vite": "^5.2.8"
+  }
+}
