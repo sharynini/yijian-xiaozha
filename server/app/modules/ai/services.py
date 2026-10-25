@@ -203,6 +203,8 @@ CUTOUT_RATE_LIMIT = 60           # 每用户每小时最多抠图次数（本地
 CUTOUT_ALPHA_THRESHOLD = 16      # 透明度低于它的像素视为背景（用于裁边）
 CUTOUT_MIN_AREA_RATIO = 0.01     # 前景面积不到原图 1%，视为没抠出东西
 CUTOUT_PADDING_RATIO = 0.04      # 裁边后四周留一点空白
+CUTOUT_KEEP_RATIO = 0.3          # 只保留主体：面积不小于最大色块 30% 的色块才保留（一双鞋两只都留）
+CUTOUT_LABEL_SIDE = 384          # 找连通块时把掩码缩到这个边长，兼顾速度与精度
 
 _cutout_calls: Dict[int, Deque[float]] = defaultdict(deque)
 _session = None                  # rembg 模型会话：只加载一次，常驻内存
@@ -235,6 +237,7 @@ class CutoutService:
         image.thumbnail((max_side, max_side))
 
         result = CutoutService._remove_background(image).convert('RGBA')
+        result = CutoutService._keep_main_subject(result)
         cropped = CutoutService._crop_to_content(result)
 
         filename = f'{user_id}_{uuid.uuid4().hex}.png'
@@ -258,12 +261,63 @@ class CutoutService:
                     model = current_app.config.get('REMBG_MODEL') or 'isnet-general-use'
                     current_app.logger.info('加载抠图模型 %s（首次会下载模型文件，可能较慢）', model)
                     _session = new_session(model)
+            # 掩码后处理会把腋下、裤裆这类窄凹口当成小洞填上，默认关闭；需要时用 CUTOUT_POST_PROCESS 打开
+            if current_app.config.get('CUTOUT_POST_PROCESS'):
+                try:
+                    return remove(image, session=_session, post_process_mask=True)
+                except TypeError:
+                    pass                 # 个别 rembg 版本不支持该参数，退回默认处理
             return remove(image, session=_session)
         except ApiError:
             raise
         except Exception as e:
             current_app.logger.exception('抠图失败：%s', e)
             raise ApiError('抠图失败（模型可能还没下载好），已保留原图', code=8007)
+
+    @staticmethod
+    def _keep_main_subject(image):
+        """
+        只保留主体：找出所有互不相连的前景色块，只留最大的那块，
+        以及面积和它差不多的（≥ CUTOUT_KEEP_RATIO，比如一双鞋的另一只）；
+        和衣服不相连的杯子、书、手机等杂物会被去掉。
+        只用 Pillow + numpy（rembg 已自带），不额外引入 OpenCV；不可用时原样返回。
+        """
+        try:
+            import numpy as np
+            from PIL import Image, ImageDraw, ImageFilter
+        except ImportError:
+            return image
+
+        rgba = np.array(image)
+        h, w = rgba.shape[:2]
+        fg = rgba[:, :, 3] >= CUTOUT_ALPHA_THRESHOLD
+
+        # 在缩小的掩码上找连通块，速度快；结果再放大回原尺寸
+        scale = min(1.0, CUTOUT_LABEL_SIDE / max(h, w))
+        sw, sh = max(1, round(w * scale)), max(1, round(h * scale))
+        labels = Image.fromarray(fg.astype(np.uint8) * 255).resize((sw, sh), Image.NEAREST)
+
+        areas = {}
+        arr = np.array(labels)
+        for label in range(1, 255):                    # 255 = 还没编号的前景，0 = 背景
+            ys, xs = np.nonzero(arr == 255)
+            if not len(ys):
+                break
+            ImageDraw.floodfill(labels, (int(xs[0]), int(ys[0])), label, thresh=0)
+            arr = np.array(labels)
+            areas[label] = int((arr == label).sum())
+
+        if len(areas) <= 1:                            # 只有一个色块，无需处理
+            return image
+
+        biggest = max(areas.values())
+        keep = [k for k, a in areas.items() if a >= biggest * CUTOUT_KEEP_RATIO]
+        keep_small = Image.fromarray(np.isin(arr, keep).astype(np.uint8) * 255)
+        # 稍微外扩一圈再放大，避免缩放时把衣服边缘误删
+        keep_full = np.array(keep_small.filter(ImageFilter.MaxFilter(3)).resize((w, h), Image.NEAREST)) > 0
+
+        rgba[:, :, 3] = np.where(keep_full, rgba[:, :, 3], 0)
+        return Image.fromarray(rgba, 'RGBA')
 
     @staticmethod
     def _crop_to_content(image):

@@ -108,3 +108,43 @@ def test_rate_limit(client, auth_header, user, folder):
         for _ in range(ai_services.CUTOUT_RATE_LIMIT):
             assert _post(client, auth_header, image)['code'] == 0
         assert _post(client, auth_header, image)['code'] == 8004
+
+
+# ---------------- 只保留主体 ----------------
+def _cutout_with(rects, size=(400, 400)):
+    """生成一张透明图，rects 里的每个矩形是一个不透明色块"""
+    def fake(image):
+        out = Image.new('RGBA', size, (0, 0, 0, 0))
+        for (x, y, w, h) in rects:
+            out.paste(Image.new('RGBA', (w, h), (255, 0, 0, 255)), (x, y))
+        return out
+    return fake
+
+
+def _saved(folder, body):
+    return Image.open(folder / body['data']['path'].rsplit('/', 1)[-1])
+
+
+def test_clutter_removed(client, auth_header, user, folder):
+    """衣服旁边的小杂物（不相连）会被去掉，只剩衣服"""
+    image = _own_photo(folder, user.id, size=(400, 400))
+    rects = [(150, 120, 120, 200),   # 衣服：120×200
+             (10, 10, 40, 40),       # 杯子
+             (330, 340, 50, 30)]     # 手机
+    with patch.object(ai_services.CutoutService, '_remove_background', side_effect=_cutout_with(rects)):
+        body = _post(client, auth_header, image)
+
+    w, h = _saved(folder, body).size
+    # 只剩衣服本身 + 少量边距，没有被杂物撑大
+    assert 120 <= w <= 140 and 200 <= h <= 220
+
+
+def test_pair_of_shoes_both_kept(client, auth_header, user, folder):
+    """一双鞋两只大小相近，都要保留"""
+    image = _own_photo(folder, user.id, size=(400, 400))
+    rects = [(40, 150, 120, 80), (240, 170, 110, 80)]
+    with patch.object(ai_services.CutoutService, '_remove_background', side_effect=_cutout_with(rects)):
+        body = _post(client, auth_header, image)
+
+    w, _ = _saved(folder, body).size
+    assert w >= 310                  # 横跨两只鞋

@@ -60,6 +60,8 @@ class Config:
     # 本地抠图（rembg）：模型名与处理前缩放的最长边
     REMBG_MODEL = os.getenv('REMBG_MODEL') or 'isnet-general-use'
     CUTOUT_MAX_SIDE = int(os.getenv('CUTOUT_MAX_SIDE') or 1024)
+    # 抠图掩码后处理（抹平毛边，但会填掉腋下等窄缝隙），默认关闭；填 1 / true 打开
+    CUTOUT_POST_PROCESS = (os.getenv('CUTOUT_POST_PROCESS') or '').strip().lower() in ('1', 'true', 'yes')
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
