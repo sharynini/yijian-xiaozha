@@ -10,6 +10,7 @@ import { MOODS } from '@/utils/constants'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
+import OutfitCollage from '@/components/OutfitCollage.vue'
 
 const STYLE_CHIPS = [
   { t: '通勤', bg: '#dbeafe', c: '#2563eb' },
@@ -145,7 +146,7 @@ function toggleStar(e, id) {
 }
 
 function goRecord() {
-  uni.navigateTo({ url: '/pages/outfit/select' })
+  uni.navigateTo({ url: '/pages/outfit/canvas' })
 }
 
 const hasMore = computed(() => logs.value.length < total.value)
@@ -179,7 +180,14 @@ const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.it
         >
           <view class="corner">{{ decoFor(row.log.log_id) }}</view>
           <view class="preview">
-            <view class="cover"><SafeImage :src="coverOf(row.log)" /></view>
+            <!-- 手动搭配的记录显示拼贴图；有现场照时贴在右上角 -->
+            <template v-if="row.log.collage">
+              <view class="cover collage-cover">
+                <OutfitCollage :collage="row.log.collage" :items="row.log.items" />
+              </view>
+              <view v-if="row.log.photo_url" class="photo-inset"><SafeImage :src="row.log.photo_url" /></view>
+            </template>
+            <view v-else class="cover"><SafeImage :src="coverOf(row.log)" /></view>
             <view class="emo">{{ moodEmoji(row.log.mood) }}</view>
           </view>
           <view class="body">
@@ -308,6 +316,23 @@ const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.it
 }
 .preview { position: relative; height: 280rpx; background: #fff0f4; }
 .cover { width: 100%; height: 280rpx; }
+.collage-cover {
+  /* 拼贴图是正方形：居中显示，两侧留出底色 */
+  width: 280rpx;
+  margin: 0 auto;
+}
+.photo-inset {
+  position: absolute;
+  top: 16rpx;
+  right: 16rpx;
+  width: 120rpx;
+  height: 120rpx;
+  padding: 6rpx 6rpx 14rpx;
+  background: #fff;
+  border-radius: 8rpx;
+  transform: rotate(4deg);
+  box-shadow: 0 6rpx 14rpx rgba(56, 46, 54, 0.12);
+}
 .cover.ph {
   display: flex;
   align-items: center;

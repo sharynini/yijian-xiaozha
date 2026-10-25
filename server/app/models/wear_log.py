@@ -37,6 +37,8 @@ class WearLog(db.Model):
     weather = db.Column(db.String(20), nullable=True, comment='天气：晴/多云/阴/雨/雪等')
     items_snapshot = db.Column(db.JSON, nullable=True,
                                comment='当天衣物快照（item_id列表及当时信息），支持非outfit穿搭记录')
+    collage = db.Column(db.JSON, nullable=True,
+                        comment='手动搭配画布布局 [{item_id,x,y,w,z}]，x/y/w 为相对画布边长的 0~1 比例')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                            server_default=db.text('CURRENT_TIMESTAMP'), comment='创建时间')
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow,
@@ -56,6 +58,7 @@ class WearLog(db.Model):
             'temperature': float(self.temperature) if self.temperature is not None else None,
             'weather': self.weather,
             'items': self._snapshot_for_output(),
+            'collage': self.collage or None,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
         }

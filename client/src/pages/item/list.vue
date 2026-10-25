@@ -1,34 +1,25 @@
 <script setup>
 /**
  * 衣物列表页（衣橱 tab）
- *   - 顶部筛选：季节 / 类型 / 颜色
- *   - 网格展示 + 下拉刷新 + 上拉加载更多
+ *   - 左侧导航：筛选（颜色/季节/场合组合筛选面板）+ 全部 + 各分类
+ *   - 右侧两列网格，卡片展示类型 / 颜色 / 季节 / 场合
+ *   - 下拉刷新 + 上拉加载更多
  *   - 左滑出现「删除」按钮（软删除 DELETE /api/items/<id>）
  *   - 点击卡片进入编辑页
- *   - 空状态引导去添加
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import { get, del } from '@/utils/request'
-import { FILTER_TYPES, FILTER_SEASONS, FILTER_COLORS } from '@/utils/constants'
+import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
 
-const CAT_TABS = [
-  { label: '全部', typeIndex: 0, color: '#FF8FB1' },
-  { label: '上装', typeIndex: 1, color: '#93C5FD' },
-  { label: '下装', typeIndex: 2, color: '#8EE4AF' },
-  { label: '鞋包', typeIndex: 4, color: '#FFD56B' },
-  { label: '配饰', typeIndex: 5, color: '#C4B5FD' }
-]
-
-const TIPS = ['这件很适合搭配浅色上衣哦！', '桃桃觉得今天穿它刚刚好～', '低调又好搭，通勤也可以！']
+// 左侧分类：value 为空表示「全部」
+const CATEGORIES = [{ label: '全部', value: '' }, ...ITEM_TYPES.map((t) => ({ label: t, value: t }))]
 
 const statusPad = (uni.getSystemInfoSync().statusBarHeight || 12) + 8
 const spinning = ref(false)
-const tipId = ref(null)
-const tipText = ref('')
 
 const PER_PAGE = 10
 
@@ -39,9 +30,25 @@ const loading = ref(false)
 const loaded = ref(false)      // 是否已完成过一次请求（用于区分「空数据」与「还没加载」）
 const loadError = ref(false)
 
-const typeIndex = ref(0)
-const seasonIndex = ref(0)
-const colorIndex = ref(0)
+// ---------- 分类与筛选 ----------
+const currentType = ref('')
+// 已生效的筛选条件；空串表示不限
+const filters = ref({ color: '', season: '', occasion: '' })
+// 面板里正在编辑、还没点「确定」的筛选条件
+const draft = ref({ color: '', season: '', occasion: '' })
+const showFilter = ref(false)
+
+const FILTER_GROUPS = [
+  { key: 'season', title: '季节', options: SEASONS },
+  { key: 'occasion', title: '场合', options: OCCASIONS },
+  { key: 'color', title: '颜色', options: COLORS }
+]
+
+const activeFilterChips = computed(() =>
+  FILTER_GROUPS
+    .filter((g) => filters.value[g.key])
+    .map((g) => ({ key: g.key, text: `${g.title}·${filters.value[g.key]}` }))
+)
 
 const finished = computed(() => loaded.value && items.value.length >= total.value)
 
@@ -62,9 +69,10 @@ async function fetchItems(reset = false) {
   loadError.value = false
   try {
     const params = { page: page.value, per_page: PER_PAGE }
-    if (typeIndex.value > 0) params.type = FILTER_TYPES[typeIndex.value]
-    if (seasonIndex.value > 0) params.season = FILTER_SEASONS[seasonIndex.value]
-    if (colorIndex.value > 0) params.color = FILTER_COLORS[colorIndex.value]
+    if (currentType.value) params.type = currentType.value
+    Object.entries(filters.value).forEach(([k, v]) => {
+      if (v) params[k] = v
+    })
 
     const data = await get('/api/items', params)
     total.value = data.total || 0
@@ -83,7 +91,33 @@ function reload() {
   return fetchItems(true)
 }
 
-function onFilterChange() {
+function selectType(cat) {
+  if (currentType.value === cat.value) return
+  currentType.value = cat.value
+  reload()
+}
+
+function openFilter() {
+  draft.value = { ...filters.value }
+  showFilter.value = true
+}
+
+function toggleDraft(key, value) {
+  draft.value[key] = draft.value[key] === value ? '' : value
+}
+
+function resetDraft() {
+  draft.value = { color: '', season: '', occasion: '' }
+}
+
+function applyFilter() {
+  filters.value = { ...draft.value }
+  showFilter.value = false
+  reload()
+}
+
+function clearChip(key) {
+  filters.value[key] = ''
   reload()
 }
 
@@ -163,13 +197,13 @@ function removeItem(item) {
 }
 
 // ---------- 跳转 ----------
-function goEdit(item) {
+function onCardClick(item) {
   if (dragged) {
     dragged = false
     return
   }
   if (item._offset) {
-    // 已展开时点击先收起
+    // 已展开删除按钮时，点击先收起
     closeItem(item)
     return
   }
@@ -180,43 +214,14 @@ function goAdd() {
   uni.navigateTo({ url: '/pages/item/add' })
 }
 
-function selectCat(tab) {
-  typeIndex.value = tab.typeIndex
-  onFilterChange()
-}
-
-function openFilter() {
-  uni.showActionSheet({
-    itemList: FILTER_SEASONS.map((s, i) => (i === 0 ? '季节·全部' : '季节·' + s)),
-    success: (res) => {
-      seasonIndex.value = res.tapIndex
-      onFilterChange()
-    }
-  })
-}
-
-function showTip(item) {
-  tipId.value = item.item_id
-  tipText.value = TIPS[(item.item_id || 0) % TIPS.length]
-  setTimeout(() => {
-    if (tipId.value === item.item_id) tipId.value = null
-  }, 1800)
-}
-
-function onCardClick(item) {
-  if (dragged) {
-    dragged = false
-    return
-  }
-  if (item._offset) {
-    closeItem(item)
-    return
-  }
-  if (tipId.value === item.item_id) {
-    uni.navigateTo({ url: `/pages/item/add?id=${item.item_id}` })
-    return
-  }
-  showTip(item)
+/** 卡片上展示的标签：类型 / 颜色 / 季节 / 场合，四个都显示；没填的显示灰色「未填」 */
+function cardTags(item) {
+  return [
+    { key: 'type', text: item.type, empty: '类型未填' },
+    { key: 'color', text: item.color, empty: '颜色未填' },
+    { key: 'season', text: item.season, empty: '季节未填' },
+    { key: 'occasion', text: item.occasion, empty: '场合未填' }
+  ].map((t) => ({ key: t.key, text: t.text || t.empty, cls: t.text ? t.key : 'none' }))
 }
 </script>
 
@@ -228,63 +233,104 @@ function onCardClick(item) {
 
     <view class="title">我的衣橱👗</view>
 
-    <scroll-view scroll-x class="cats" :show-scrollbar="false">
-      <view
-        v-for="tab in CAT_TABS"
-        :key="tab.label"
-        class="cat press-bounce"
-        :class="{ on: typeIndex === tab.typeIndex }"
-        :style="{ '--c': tab.color }"
-        @click="selectCat(tab)"
-      >{{ tab.label }}</view>
-      <view class="filter-btn press-bounce" @click="openFilter">☰</view>
-    </scroll-view>
-
-    <view class="grid">
-      <view v-for="item in items" :key="item.item_id" class="cell">
-        <view class="cell-del" :style="{ width: DEL_WIDTH + 'px' }" @click="removeItem(item)">删除</view>
+    <view class="body">
+      <!-- 左侧导航 -->
+      <view class="side" :style="{ top: statusPad + 'px' }">
         <view
-          class="cell-body press-bounce"
-          :style="{ transform: 'translateX(' + (item._offset || 0) + 'px)' }"
-          @touchstart="onTouchStart($event, item)"
-          @touchmove="onTouchMove($event, item)"
-          @touchend="onTouchEnd(item)"
-          @click="onCardClick(item)"
+          class="side-item filter press-bounce"
+          :class="{ active: activeFilterChips.length }"
+          @click="openFilter"
         >
-          <view class="thumb-wrap">
-            <view class="thumb"><SafeImage :src="item.image_url" /></view>
-            <view class="season-tag">{{ item.season || '未填' }}</view>
-            <view v-if="item.season === '夏' || item.season === '春'" class="sun">☀</view>
+          <text class="filter-ico">☰</text>
+          <text>筛选</text>
+          <view v-if="activeFilterChips.length" class="dot">{{ activeFilterChips.length }}</view>
+        </view>
+        <view
+          v-for="cat in CATEGORIES"
+          :key="cat.label"
+          class="side-item"
+          :class="{ on: currentType === cat.value }"
+          @click="selectType(cat)"
+        >{{ cat.label }}</view>
+      </view>
+
+      <!-- 右侧内容 -->
+      <view class="main">
+        <view v-if="activeFilterChips.length" class="chips">
+          <view
+            v-for="chip in activeFilterChips"
+            :key="chip.key"
+            class="chip"
+            @click="clearChip(chip.key)"
+          >{{ chip.text }} ✕</view>
+        </view>
+
+        <view class="grid">
+          <view v-for="item in items" :key="item.item_id" class="cell">
+            <view class="cell-del" :style="{ width: DEL_WIDTH + 'px' }" @click="removeItem(item)">删除</view>
+            <view
+              class="cell-body press-bounce"
+              :style="{ transform: 'translateX(' + (item._offset || 0) + 'px)' }"
+              @touchstart="onTouchStart($event, item)"
+              @touchmove="onTouchMove($event, item)"
+              @touchend="onTouchEnd(item)"
+              @click="onCardClick(item)"
+            >
+              <view class="thumb"><SafeImage :src="item.image_url" /></view>
+              <view class="tags">
+                <text v-for="tag in cardTags(item)" :key="tag.key" class="tag" :class="tag.cls">{{ tag.text }}</text>
+              </view>
+              <view class="meta">已穿 {{ item.wear_count || 0 }} 次</view>
+            </view>
           </view>
-          <view v-if="tipId === item.item_id" class="bubble">
-            <TaotaoSprite mood="wink" :size="52" />
-            <text>{{ tipText }}</text>
+        </view>
+
+        <view v-if="loadError && !items.length" class="empty">
+          <TaotaoSprite mood="closet" :size="140" />
+          <view class="empty-text">衣橱加载失败</view>
+          <button class="btn-primary empty-btn" @click="reload">重试</button>
+        </view>
+        <view v-else-if="loaded && !items.length && !loading" class="empty">
+          <TaotaoSprite mood="closet" :size="150" />
+          <view class="empty-text">
+            {{ currentType || activeFilterChips.length ? '这里还没有符合条件的衣服' : '衣橱空空，快去上传你的漂亮衣服✨' }}
           </view>
-          <view class="bar">{{ item.type }} ｜ {{ item.color || '未填色' }}</view>
-          <view class="meta">已穿{{ item.wear_count || 0 }}次
-            <text class="style">{{ item.occasion || '日常' }}款</text>
-          </view>
+          <button class="btn-primary empty-btn" @click="goAdd">添加衣物</button>
+        </view>
+        <view v-else-if="loading && !items.length" class="loading-text">加载中…</view>
+        <view v-else-if="items.length" class="loading-text">
+          {{ finished ? '已经到底啦' : (loading ? '加载中…' : '上拉加载更多') }}
         </view>
       </view>
     </view>
 
-    <view v-if="loadError && !items.length" class="empty">
-      <TaotaoSprite mood="closet" :size="160" />
-      <view class="empty-text">衣橱加载失败</view>
-      <button class="btn-primary empty-btn" @click="reload">重试</button>
-    </view>
-    <view v-else-if="loaded && !items.length && !loading" class="empty">
-      <TaotaoSprite mood="closet" :size="180" />
-      <view class="empty-text">衣橱空空，快去上传你的漂亮衣服✨</view>
-      <button class="btn-primary empty-btn" @click="goAdd">添加衣物</button>
-    </view>
-    <view v-else-if="loading && !items.length" class="loading-text">加载中…</view>
-    <view v-else-if="items.length" class="loading-text">
-      {{ finished ? '已经到底啦' : (loading ? '加载中…' : '上拉加载更多') }}
-    </view>
-
     <view class="fab press-bounce" @click="goAdd">
       <text class="tee">👕</text>
+    </view>
+
+    <!-- 筛选面板（从底部弹出） -->
+    <view v-if="showFilter" class="mask" @click="showFilter = false">
+      <view class="panel" @click.stop>
+        <view class="panel-title">筛选衣物</view>
+        <scroll-view scroll-y class="panel-body">
+          <view v-for="group in FILTER_GROUPS" :key="group.key" class="group">
+            <view class="group-title">{{ group.title }}</view>
+            <view class="opts">
+              <view
+                v-for="opt in group.options"
+                :key="opt"
+                class="opt"
+                :class="{ on: draft[group.key] === opt }"
+                @click="toggleDraft(group.key, opt)"
+              >{{ opt }}</view>
+            </view>
+          </view>
+        </scroll-view>
+        <view class="panel-actions">
+          <view class="btn-ghost" @click="resetDraft">重置</view>
+          <view class="btn-ok" @click="applyFilter">确定</view>
+        </view>
+      </view>
     </view>
 
     <AppTabBar current="closet" />
@@ -294,7 +340,7 @@ function onCardClick(item) {
 <style scoped>
 .page {
   min-height: 100vh;
-  padding: 8rpx 24rpx 40rpx;
+  padding: 8rpx 20rpx 40rpx 0;
   box-sizing: border-box;
 }
 .spin-mask {
@@ -311,49 +357,107 @@ function onCardClick(item) {
   font-size: 40rpx;
   font-weight: 800;
   margin-bottom: 16rpx;
-}
-.cats {
-  white-space: nowrap;
-  margin-bottom: 20rpx;
-  width: 100%;
-}
-.cat {
-  display: inline-flex;
-  padding: 12rpx 28rpx;
-  margin-right: 12rpx;
-  border-radius: 999rpx;
-  background: #fffdfb;
-  border: 2rpx solid #f3d5dc;
-  font-size: 24rpx;
-  color: #8a7f88;
-}
-.cat.on {
-  background: var(--c, #ff8fb1);
-  color: #fff;
-  border-color: transparent;
-  font-weight: 700;
-}
-.filter-btn {
-  display: inline-flex;
-  width: 64rpx;
-  height: 64rpx;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  background: #fffdfb;
-  border: 2rpx dashed #f3b8c8;
-  vertical-align: middle;
+  padding-left: 20rpx;
 }
 
+.body {
+  display: flex;
+  align-items: flex-start;
+}
+
+/* ---------- 左侧导航 ---------- */
+.side {
+  position: sticky;
+  flex-shrink: 0;
+  width: 148rpx;
+  margin-right: 16rpx;
+  background: #fffdfb;
+  border-radius: 0 28rpx 28rpx 0;
+  box-shadow: 0 10rpx 30rpx rgba(255, 150, 175, 0.12);
+  padding: 12rpx 0;
+  z-index: 5;
+}
+.side-item {
+  position: relative;
+  height: 84rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 26rpx;
+  color: #8a7f88;
+}
+.side-item.on {
+  color: #ff8fb1;
+  font-weight: 800;
+  background: #fff0f5;
+}
+.side-item.on::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 22rpx;
+  bottom: 22rpx;
+  width: 8rpx;
+  border-radius: 0 8rpx 8rpx 0;
+  background: #ff8fb1;
+}
+.side-item.filter {
+  margin: 0 14rpx 10rpx;
+  border: 2rpx dashed #f3b8c8;
+  border-radius: 20rpx;
+  gap: 6rpx;
+  font-size: 24rpx;
+}
+.side-item.filter.active {
+  background: #ff8fb1;
+  border-color: #ff8fb1;
+  color: #fff;
+  font-weight: 700;
+}
+.filter-ico { font-size: 22rpx; }
+.dot {
+  position: absolute;
+  top: -10rpx;
+  right: -8rpx;
+  min-width: 30rpx;
+  height: 30rpx;
+  line-height: 30rpx;
+  padding: 0 6rpx;
+  border-radius: 999rpx;
+  background: #ffd56b;
+  color: #382e36;
+  font-size: 18rpx;
+  text-align: center;
+  box-sizing: border-box;
+}
+
+/* ---------- 右侧内容 ---------- */
+.main {
+  flex: 1;
+  min-width: 0;
+}
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10rpx;
+  margin-bottom: 16rpx;
+}
+.chip {
+  font-size: 22rpx;
+  padding: 6rpx 16rpx;
+  border-radius: 999rpx;
+  background: #ffe4ed;
+  color: #e05690;
+}
 .grid {
   display: flex;
   flex-wrap: wrap;
-  gap: 20rpx;
+  gap: 16rpx;
 }
 .cell {
   position: relative;
-  width: calc((100% - 20rpx) / 2);
-  border-radius: 24rpx;
+  width: calc((100% - 16rpx) / 2);
+  border-radius: 22rpx;
   overflow: hidden;
   background: #ff8fb1;
 }
@@ -373,82 +477,51 @@ function onCardClick(item) {
   position: relative;
   z-index: 1;
   background: #fffdfb;
-  border-radius: 24rpx;
+  border-radius: 22rpx;
   overflow: hidden;
-  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.14);
+  box-shadow: 0 10rpx 30rpx rgba(255, 150, 175, 0.12);
   transition: transform 0.12s ease;
-  border: 2rpx dashed #f3d5dc;
+  border: 2rpx solid #fbe3ea;
 }
-.thumb-wrap { position: relative; }
 .thumb {
   width: 100%;
-  height: 340rpx;
+  height: 260rpx;
   background: #fff0f4;
 }
-.season-tag {
-  position: absolute;
-  left: 12rpx;
-  top: 12rpx;
-  background: #ffe4ed;
-  color: #e05690;
-  font-size: 20rpx;
-  padding: 4rpx 12rpx;
-  border-radius: 999rpx;
-  font-weight: 700;
-}
-.sun {
-  position: absolute;
-  right: 12rpx;
-  top: 12rpx;
-  font-size: 28rpx;
-}
-.bubble {
-  position: absolute;
-  left: 12rpx;
-  right: 12rpx;
-  top: 200rpx;
-  background: #fffdfb;
-  border: 2rpx dashed #ffb3c9;
-  border-radius: 20rpx;
-  padding: 8rpx 12rpx;
+.tags {
   display: flex;
-  align-items: center;
-  gap: 8rpx;
-  font-size: 20rpx;
-  color: #382e36;
-  z-index: 3;
+  flex-wrap: wrap;
+  gap: 6rpx;
+  padding: 12rpx 12rpx 0;
 }
-.bar {
-  background: linear-gradient(90deg, #ffe4ed, #fff4c8);
-  padding: 10rpx 16rpx;
-  font-size: 24rpx;
-  font-weight: 700;
-}
-.meta {
-  padding: 8rpx 16rpx 16rpx;
-  font-size: 20rpx;
-  color: #8a7f88;
-}
-.style {
-  margin-left: 8rpx;
-  background: #dbeafe;
-  color: #2563eb;
-  padding: 2rpx 10rpx;
-  border-radius: 999rpx;
+.tag {
   font-size: 18rpx;
+  line-height: 1.6;
+  padding: 0 10rpx;
+  border-radius: 999rpx;
+}
+.tag.type { background: #ffe4ed; color: #e05690; font-weight: 700; }
+.tag.color { background: #f3eefe; color: #7c5cd6; }
+.tag.season { background: #e3f7ec; color: #2f9e63; }
+.tag.occasion { background: #e3efff; color: #2563eb; }
+.tag.none { background: #f4f1f3; color: #b3a7b0; }
+.meta {
+  padding: 8rpx 12rpx 14rpx;
+  font-size: 20rpx;
+  color: #a79ca5;
 }
 
-.empty { padding: 80rpx 0; text-align: center; }
-.empty-text { margin-top: 12rpx; color: #8a7f88; }
-.empty-btn { margin-top: 28rpx; width: 360rpx; }
+.empty { padding: 60rpx 0; text-align: center; }
+.empty-text { margin-top: 12rpx; color: #8a7f88; font-size: 24rpx; padding: 0 12rpx; }
+.empty-btn { margin-top: 24rpx; width: 300rpx; }
 .loading-text { text-align: center; color: #8a7f88; font-size: 22rpx; padding: 24rpx 0; }
 
 .fab {
   position: fixed;
   right: 28rpx;
   bottom: 180rpx;
-  width: 120rpx;
-  height: 120rpx;
+  width: 110rpx;
+  height: 110rpx;
   border-radius: 50%;
   background: linear-gradient(180deg, #ffb3c9, #ff8fb1);
   box-shadow: 0 12rpx 24rpx rgba(255, 143, 177, 0.4);
@@ -458,4 +531,77 @@ function onCardClick(item) {
   z-index: 20;
 }
 .tee { font-size: 44rpx; }
+
+/* ---------- 筛选面板 ---------- */
+.mask {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(56, 46, 54, 0.35);
+  display: flex;
+  align-items: flex-end;
+}
+.panel {
+  width: 100%;
+  background: #fffdfb;
+  border-radius: 32rpx 32rpx 0 0;
+  padding: 28rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+  animation: slide-up 0.22s ease;
+}
+.panel-title {
+  text-align: center;
+  font-size: 30rpx;
+  font-weight: 800;
+  margin-bottom: 12rpx;
+}
+.panel-body { max-height: 60vh; }
+.group { margin-top: 20rpx; }
+.group-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #382e36;
+  margin-bottom: 12rpx;
+}
+.opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14rpx;
+}
+.opt {
+  padding: 10rpx 24rpx;
+  border-radius: 999rpx;
+  background: #fff5f8;
+  border: 2rpx solid #fbe3ea;
+  font-size: 24rpx;
+  color: #8a7f88;
+}
+.opt.on {
+  background: #ff8fb1;
+  border-color: #ff8fb1;
+  color: #fff;
+  font-weight: 700;
+}
+.panel-actions {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 28rpx;
+}
+.btn-ghost,
+.btn-ok {
+  flex: 1;
+  height: 84rpx;
+  line-height: 84rpx;
+  text-align: center;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+}
+.btn-ghost { background: #fff5f8; color: #ff8fb1; border: 2rpx dashed #ffb3c9; }
+.btn-ok { background: linear-gradient(180deg, #ffb3c9, #ff8fb1); color: #fff; }
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
 </style>

@@ -62,6 +62,7 @@ function _dedupKey(method, url, data) {
  * @param {boolean} [options.loading]     是否显示 loading，默认 false
  * @param {string} [options.loadingText]  loading 文案
  * @param {boolean} [options.skipDedup]   跳过 GET 去重（比如强刷），默认 false
+ * @param {boolean} [options.silent]      出错时不弹 toast（由调用方自行处理），默认 false
  * @returns {Promise<any>} resolve 业务 data；reject 业务错误体
  */
 export function request(options = {}) {
@@ -73,6 +74,7 @@ export function request(options = {}) {
     loading = false,
     loadingText = '加载中...',
     skipDedup = false,
+    silent = false,
   } = options
 
   if (loading) {
@@ -118,12 +120,12 @@ export function request(options = {}) {
         // ③ 其他错误（HTTP 非 2xx 或业务码非 0）
         const msg = (body && body.msg) || `请求失败(${statusCode})`
         console.warn('[request] business error', { url, statusCode, bizCode, body })
-        uni.showToast({ title: msg, icon: 'none' })
+        if (!silent) uni.showToast({ title: msg, icon: 'none' })
         reject(body || { code: statusCode, msg })
       },
       fail: (err) => {
         console.error('[request] network fail', { url, err })
-        uni.showToast({ title: '网络异常，请检查网络', icon: 'none' })
+        if (!silent) uni.showToast({ title: '网络异常，请检查网络', icon: 'none' })
         reject(err)
       },
       complete: () => {

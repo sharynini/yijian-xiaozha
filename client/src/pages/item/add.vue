@@ -9,7 +9,7 @@
  */
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { get, post, put, uploadFile } from '@/utils/request'
+import { get, post, put, del, uploadFile } from '@/utils/request'
 import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
 
 const editId = ref(null)      // 非空即编辑模式
@@ -17,6 +17,7 @@ const imageUrl = ref('')      // 上传成功后的服务器地址（提交用�
 const previewPath = ref('')   // 本地预览路径（选图后立即显示）
 const uploading = ref(false)
 const submitting = ref(false)
+const deleting = ref(false)
 
 const form = ref({
   type: '',
@@ -106,6 +107,31 @@ function previewImage() {
 function toggle(field, value) {
   // 单选标签：再次点击可取消选择
   form.value[field] = form.value[field] === value ? '' : value
+}
+
+// ---------- 删除（仅编辑模式） ----------
+function removeItem() {
+  if (!editId.value || deleting.value) return
+  uni.showModal({
+    title: '删除衣物',
+    content: '确定删除这件衣物吗？删除后衣橱里不再显示，已有的穿搭日记不受影响。',
+    confirmText: '删除',
+    confirmColor: '#e05c5c',
+    success: async (res) => {
+      if (!res.confirm) return
+      deleting.value = true
+      try {
+        await del(`/api/items/${editId.value}`)
+        uni.showToast({ title: '已删除', icon: 'success' })
+        // 返回衣橱（列表页 onShow 会自动刷新）
+        setTimeout(() => uni.navigateBack(), 600)
+      } catch (e) {
+        // 统一错误提示
+      } finally {
+        deleting.value = false
+      }
+    }
+  })
 }
 
 // ---------- 提交 ----------
@@ -260,10 +286,16 @@ async function submit() {
       />
     </view>
 
-    <button class="btn-primary" :disabled="submitting || uploading" @click="submit">
+    <button class="btn-primary" :disabled="submitting || uploading || deleting" @click="submit">
       {{ submitting ? '提交中...' : (editId ? '保存修改' : '确认入库') }}
     </button>
-    <view class="bottom-tip">照片会先上传到服务器，再提交衣物信息</view>
+    <button
+      v-if="editId"
+      class="btn-danger"
+      :disabled="submitting || deleting"
+      @click="removeItem"
+    >{{ deleting ? '删除中...' : '删除衣物' }}</button>
+    <view v-if="!editId" class="bottom-tip">照片会先上传到服务器，再提交衣物信息</view>
   </view>
 </template>
 
@@ -365,6 +397,20 @@ async function submit() {
 }
 .ph {
   color: #a4b0be;
+}
+
+.btn-danger {
+  margin-top: 24rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  border-radius: 999rpx;
+  background: #fffdfb;
+  color: #e05c5c;
+  font-size: 30rpx;
+  border: 2rpx solid #f5c2c2;
+}
+.btn-danger::after {
+  border: none;
 }
 
 .bottom-tip {

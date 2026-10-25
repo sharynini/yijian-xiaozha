@@ -60,7 +60,7 @@ def create_item():
 def list_items():
     """
     获取衣物列表（筛选 + 分页）
-    GET /api/items?type=&color=&season=&page=&per_page=
+    GET /api/items?type=&color=&season=&occasion=&page=&per_page=
     Header: Authorization: Bearer <token>
     """
     user_id = _current_user_id()
@@ -71,6 +71,7 @@ def list_items():
         item_type=request.args.get('type'),
         color=request.args.get('color'),
         season=request.args.get('season'),
+        occasion=request.args.get('occasion'),
         page=page,
         per_page=per_page,
     )

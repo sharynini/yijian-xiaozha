@@ -47,6 +47,10 @@ class Config:
     UPLOAD_FOLDER = _upload_folder()
     # 图片对外访问的域名前缀（如 https://api.example.com）；留空则用当前请求的域名
     PUBLIC_BASE_URL = (os.getenv('PUBLIC_BASE_URL') or '').strip().rstrip('/')
+
+    # 和风天气（控制台 → 项目管理 获取）；未配置时首页退回手动调温度
+    QWEATHER_API_KEY = os.getenv('QWEATHER_API_KEY', '')
+    QWEATHER_API_HOST = os.getenv('QWEATHER_API_HOST', '')
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')

@@ -1,17 +1,31 @@
 <script setup>
 /**
  * 首页｜今日推荐
- * 组件：HeroGreet / CheckinNote / HeroRecommendCard / ShortcutNotes / AppTabBar
+ * 组件：HeroGreet / CheckinNote / HeroRecommendCard / AppTabBar
  */
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
+import { useUserStore } from '@/store/user'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
 
 const outfitStore = useOutfitStore()
+const userStore = useUserStore()
+
+// 问候语里的名字：优先昵称，其次用户名
+const greetName = computed(() => {
+  const u = userStore.userInfo || {}
+  return u.nickname || u.username || ''
+})
+
+/** 本地日期 YYYY-MM-DD（不能用 toISOString，那是 UTC，北京时间 0~8 点会差一天） */
+function localDateStr(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
 const statusPad = (uni.getSystemInfoSync().statusBarHeight || 12) + 8
 
 const todayRecorded = ref(false)
@@ -26,7 +40,7 @@ async function fetchTodayStatus() {
     const data = await get('/api/wear-logs', { page: 1, per_page: 1 })
     if (data.list && data.list.length) {
       const first = data.list[0]
-      const today = new Date().toISOString().slice(0, 10)
+      const today = localDateStr()
       todayRecorded.value = first.wear_date === today
       todayMood.value = first.mood || ''
     } else {
@@ -41,6 +55,69 @@ async function fetchTodayStatus() {
 
 const temperature = ref(20)
 const seasonLabel = ref('')
+
+// ---------- 定位 → 天气 ----------
+// 成功拿到当地气温后自动推荐；定位或天气失败时，显示 +/- 让用户手动调温度兜底
+const WEATHER_CACHE_KEY = 'sw_weather'
+const WEATHER_CACHE_MS = 30 * 60 * 1000
+const weather = ref(null)          // { temperature, text, city }
+const locating = ref(false)
+const manualTemp = ref(false)      // true = 走手动调温度
+const weatherTip = ref('')
+
+function readWeatherCache() {
+  try {
+    const c = uni.getStorageSync(WEATHER_CACHE_KEY)
+    if (c && Date.now() - c.ts < WEATHER_CACHE_MS) return c.data
+  } catch (e) { /* 忽略 */ }
+  return null
+}
+
+function getLocation() {
+  return new Promise((resolve, reject) => {
+    uni.getLocation({
+      type: 'wgs84',
+      success: (res) => resolve(res),
+      fail: (err) => reject(err)
+    })
+  })
+}
+
+async function loadWeather(force = false) {
+  const cached = force ? null : readWeatherCache()
+  if (cached) {
+    applyWeather(cached)
+    return
+  }
+  locating.value = true
+  weatherTip.value = ''
+  try {
+    const loc = await getLocation()
+    const data = await get('/api/weather', { lat: loc.latitude, lon: loc.longitude }, { silent: true })
+    uni.setStorageSync(WEATHER_CACHE_KEY, { ts: Date.now(), data })
+    applyWeather(data)
+  } catch (e) {
+    manualTemp.value = true
+    weather.value = null
+    if (e && e.code === 7001) weatherTip.value = '天气服务还没配置，先手动调温度吧'
+    else if (e && e.code) weatherTip.value = '天气获取失败，先手动调温度吧'
+    else weatherTip.value = '没拿到定位，先手动调温度吧'
+  } finally {
+    locating.value = false
+  }
+}
+
+function applyWeather(data) {
+  weather.value = data
+  manualTemp.value = false
+  temperature.value = Math.round(data.temperature)
+}
+
+async function refreshWeather() {
+  if (locating.value) return
+  await loadWeather(true)
+  fetchRecommend()
+}
 const recommendList = ref([])
 const loadingRecommend = ref(false)
 const recError = ref(false)
@@ -96,7 +173,10 @@ function shuffleCombo() {
 }
 
 function goRecord() {
-  uni.navigateTo({ url: '/pages/outfit/select' })
+  goCanvas()
+}
+function goCanvas() {
+  uni.navigateTo({ url: '/pages/outfit/canvas' })
 }
 function goWardrobe() {
   uni.switchTab({ url: '/pages/item/list' })
@@ -107,21 +187,18 @@ function goTimeline() {
 
 function useThisCombo(combo) {
   if (!combo) return
-  outfitStore.clearSelected()
-  combo.items.forEach((it) => {
-    outfitStore.selectedItems.push({
-      item_id: it.item_id,
-      image_url: it.image_url,
-      type: it.type,
-      color: it.color,
-      season: it.season
-    })
-  })
+  outfitStore.setOutfit(combo.items)
   uni.navigateTo({ url: '/pages/diary/create' })
 }
 
-onShow(() => {
+let weatherLoaded = false
+onShow(async () => {
   fetchTodayStatus()
+  // 第一次进入先定位拿气温再推荐；之后切回首页沿用已有温度（30 分钟内有缓存）
+  if (!weatherLoaded) {
+    weatherLoaded = true
+    await loadWeather()
+  }
   fetchRecommend()
 })
 
@@ -145,15 +222,23 @@ const todayLine = computed(() => {
       <view class="hero-row">
         <TaotaoSprite mood="wave" :size="168" />
         <view class="greet">
-          <view class="hi">哈喽～</view>
+          <view class="hi">哈喽～<text v-if="greetName" class="hi-name">{{ greetName }}</text></view>
           <view class="meta">{{ todayLine }}</view>
-          <view class="temp-row">
+          <view v-if="locating" class="temp-row">📍 正在获取当地天气…</view>
+          <view v-else-if="!manualTemp && weather" class="temp-row" @click="refreshWeather">
+            <text>📍 {{ weather.city || '当前位置' }} · {{ weather.text }}</text>
+            <text class="temp-now">{{ temperature }}℃</text>
+            <text class="refresh">↻</text>
+          </view>
+          <view v-else class="temp-row">
             <text>室外</text>
             <text class="temp-btn" @click="bumpTemp(-1)">−</text>
             <input class="temp" type="digit" v-model="temperature" @blur="fetchRecommend" />
             <text class="temp-btn" @click="bumpTemp(1)">+</text>
             <text>℃</text>
+            <text class="refresh" @click="refreshWeather">📍重试</text>
           </view>
+          <view v-if="weatherTip && manualTemp" class="weather-tip">{{ weatherTip }}</view>
         </view>
         <view v-if="seasonLabel" class="season-sticker">适合{{ seasonLabel }}穿搭</view>
       </view>
@@ -208,6 +293,7 @@ const todayLine = computed(() => {
       <view class="copy">{{ taotaoCopy }}</view>
 
       <view class="cta press-bounce" @click="useThisCombo(currentCombo)">用这套去打卡</view>
+      <view class="manual-link press-bounce" @click="goCanvas">不太满意？自己动手搭一套 ›</view>
     </view>
 
     <view v-else class="hero-card empty-rec">
@@ -216,22 +302,11 @@ const todayLine = computed(() => {
       <view class="empty-desc">
         {{ recError
           ? '网络不稳定，点重试让桃桃再想一次。'
-          : '需要同时有「上装」和「下装」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。' }}
+          : '需要「上装 + 下装」或「连衣裙」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。' }}
       </view>
       <view v-if="recError" class="cta ghost press-bounce" @click="fetchRecommend">重试</view>
       <view v-else class="cta ghost press-bounce" @click="goWardrobe">去衣橱补季节</view>
-    </view>
-
-    <!-- ShortcutNotes -->
-    <view class="shortcuts">
-      <view class="note-btn left press-bounce" @click="goRecord">
-        <view class="nb-ico">✎</view>
-        <view class="nb-t">记录今日穿搭</view>
-      </view>
-      <view class="note-btn right press-bounce" @click="goWardrobe">
-        <view class="nb-ico">🧺</view>
-        <view class="nb-t">管理衣橱</view>
-      </view>
+      <view class="manual-link press-bounce" @click="goCanvas">或者自己动手搭一套 ›</view>
     </view>
 
     <AppTabBar current="index" />
@@ -277,6 +352,15 @@ const todayLine = computed(() => {
   font-weight: 800;
   color: #382e36;
   letter-spacing: 2rpx;
+  /* 名字太长时省略，避免挤到右侧季节贴纸 */
+  max-width: 400rpx;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.hi-name {
+  color: #ff8fb1;
+  margin-left: 4rpx;
 }
 .meta {
   margin-top: 8rpx;
@@ -313,6 +397,20 @@ const todayLine = computed(() => {
   margin: 0 4rpx;
   font-size: 22rpx;
   color: #382e36;
+}
+.temp-now {
+  font-size: 30rpx;
+  font-weight: 800;
+  color: #382e36;
+}
+.refresh {
+  color: #ff8fb1;
+  font-size: 22rpx;
+}
+.weather-tip {
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: #c28a9d;
 }
 .season-sticker {
   position: absolute;
@@ -469,6 +567,13 @@ const todayLine = computed(() => {
   background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
   box-shadow: 0 10rpx 22rpx rgba(255, 143, 177, 0.38);
 }
+.manual-link {
+  margin-top: 20rpx;
+  text-align: center;
+  font-size: 26rpx;
+  color: #ff8fb1;
+  font-weight: 700;
+}
 .cta.ghost {
   background: #fff8f5;
   color: #ff8fb1;
@@ -490,23 +595,4 @@ const todayLine = computed(() => {
   line-height: 1.6;
 }
 
-.shortcuts {
-  margin-top: 36rpx;
-  display: flex;
-  justify-content: space-between;
-  position: relative;
-  z-index: 1;
-}
-.note-btn {
-  width: 46%;
-  background: #fffdfb;
-  border: 2rpx dashed #f3b8c8;
-  border-radius: 24rpx;
-  padding: 28rpx 20rpx;
-  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.1);
-}
-.note-btn.left { transform: rotate(-1.5deg); }
-.note-btn.right { transform: rotate(1.4deg); margin-top: 28rpx; }
-.nb-ico { font-size: 36rpx; }
-.nb-t { margin-top: 10rpx; font-size: 26rpx; font-weight: 700; color: #382e36; }
 </style>

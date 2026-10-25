@@ -18,6 +18,7 @@ from app.modules.outfit.routes import outfit_bp
 from app.modules.wear_log.routes import wear_log_bp
 from app.modules.recommend.routes import recommend_bp
 from app.modules.upload.routes import upload_bp
+from app.modules.weather.routes import weather_bp
 
 
 def _register_request_logging(app: Flask) -> None:
@@ -84,6 +85,7 @@ def create_app(config_name: str = 'default') -> Flask:
     app.register_blueprint(outfit_bp, url_prefix='/api/outfits')
     app.register_blueprint(wear_log_bp, url_prefix='/api/wear-logs')
     app.register_blueprint(recommend_bp, url_prefix='/api/recommend')
+    app.register_blueprint(weather_bp, url_prefix='/api/weather')
     # upload 蓝图内部已写死完整路径（/api/upload、/uploads/<filename>），故不带 url_prefix
     app.register_blueprint(upload_bp)
 

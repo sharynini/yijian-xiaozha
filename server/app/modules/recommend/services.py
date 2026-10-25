@@ -5,11 +5,11 @@
 规则：
   1. 依据温度映射季节：<10℃ 冬；10~25℃ 春秋；>=25℃ 夏（"全季"衣物始终参与）
   2. 仅使用当前用户、未软删除、状态为"正常"的对应季节衣物
-  3. 组合模板：上装 + 下装；若该季节有外套则附加一件外套
+  3. 组合模板：「上装 + 下装」或「连衣裙」单穿；若该季节有外套则附加一件外套
   4. 单品按 wear_count 升序优先（穿着次数越少越优先推荐）
   5. 最多生成 3 套互不重复的搭配，不足则返回实际套数
 """
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from app.common.errors import ApiError
 from app.models.item import Item
@@ -49,10 +49,11 @@ class RecommendService:
         # 2. 按类型分组（均已按 wear_count 升序）
         tops = [it for it in candidates if it.type == '上装']
         bottoms = [it for it in candidates if it.type == '下装']
+        dresses = [it for it in candidates if it.type == '连衣裙']
         outers = [it for it in candidates if it.type == '外套']
 
         # 3. 生成搭配
-        combos = RecommendService._build_combos(tops, bottoms, outers)
+        combos = RecommendService._build_combos(tops, bottoms, outers, dresses)
 
         result = [
             {
@@ -73,34 +74,43 @@ class RecommendService:
 
     # ---------------- 组合生成 ----------------
     @staticmethod
-    def _build_combos(tops: List[Item], bottoms: List[Item], outers: List[Item]) -> List[Dict[str, Any]]:
+    def _build_combos(
+        tops: List[Item], bottoms: List[Item], outers: List[Item], dresses: Optional[List[Item]] = None
+    ) -> List[Dict[str, Any]]:
         """
         生成最多 MAX_OUTFITS 套互不重复的搭配
-        规则：上装 + 下装（必需），有外套则附一件（可选）
-        遍历"上装 × 下装"组合，取前 MAX_OUTFITS 套不重复结果
+        规则：基础单元为「上装 + 下装」或「连衣裙」；有外套则附一件（可选）
+        两类基础单元交替取用，保证有连衣裙时推荐里能看到它；各自内部已按穿着次数升序
         """
-        if not tops or not bottoms:
-            # 缺少上装或下装，无法组成最基本搭配
-            return []
+        dresses = dresses or []
+        pairs = [[top, bottom] for top in tops for bottom in bottoms]
+        singles = [[dress] for dress in dresses]
+
+        # 交替合并：上下装、连衣裙、上下装、连衣裙……
+        bases: List[List[Item]] = []
+        for i in range(max(len(pairs), len(singles))):
+            if i < len(pairs):
+                bases.append(pairs[i])
+            if i < len(singles):
+                bases.append(singles[i])
 
         combos: List[Dict[str, Any]] = []
         seen = set()
         outer_idx = 0
 
-        for top in tops:
-            for bottom in bottoms:
-                outer = outers[outer_idx % len(outers)] if outers else None
-                outer_idx += 1
+        for base in bases:
+            outer = outers[outer_idx % len(outers)] if outers else None
+            outer_idx += 1
 
-                items = [top, bottom] + ([outer] if outer else [])
-                key = frozenset(it.id for it in items)
-                if key in seen:
-                    continue
-                seen.add(key)
-                combos.append({'items': items})
+            items = base + ([outer] if outer else [])
+            key = frozenset(it.id for it in items)
+            if key in seen:
+                continue
+            seen.add(key)
+            combos.append({'items': items})
 
-                if len(combos) >= MAX_OUTFITS:
-                    return combos
+            if len(combos) >= MAX_OUTFITS:
+                break
 
         return combos
 

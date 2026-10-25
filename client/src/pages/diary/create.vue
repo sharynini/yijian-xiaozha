@@ -3,13 +3,14 @@
  * 轻量穿搭日记页
  *
  * 「跳过」和「完成」都只调一次 POST /api/wear-logs（item_ids + 可选心情/一句话/照片）。
- * 衣物来自 Pinia outfit store（首页「用这套」或 outfit/select 手动多选）。
+ * 衣物来自 Pinia outfit store（首页「用这套」或手动搭配画布）；画布来的会带上 collage 布局一起提交。
  */
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { post, uploadFile } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
 import { MOODS } from '@/utils/constants'
+import OutfitCollage from '@/components/OutfitCollage.vue'
 
 const store = useOutfitStore()
 
@@ -99,6 +100,7 @@ async function _doSubmit() {
       mood: selectedMood.value || null,
       content: content.value.trim() || null,
       photo_url: photoUrl.value || null,
+      collage: store.collage,
       increase_wear_count: true,
     })
 
@@ -132,7 +134,10 @@ function finish() {
     <!-- 当前搭配缩略图 -->
     <view class="card">
       <view class="label">今日搭配 · {{ store.selectedItems.length }} 件</view>
-      <view class="outfit-thumbs">
+      <view v-if="store.collage" class="collage-box">
+        <OutfitCollage :collage="store.collage" :items="store.selectedItems" />
+      </view>
+      <view v-else class="outfit-thumbs">
         <image
           v-for="it in store.selectedItems"
           :key="it.item_id"
@@ -197,6 +202,14 @@ function finish() {
 </template>
 
 <style scoped>
+.collage-box {
+  width: 420rpx;
+  height: 420rpx;
+  margin: 8rpx auto 0;
+  border-radius: 24rpx;
+  overflow: hidden;
+  border: 2rpx dashed #f3b8c8;
+}
 .hint {
   font-size: 24rpx;
   color: #a4b0be;

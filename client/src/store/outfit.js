@@ -8,13 +8,28 @@
  *
  * 传哪些字段：只传 item_id/image_url/type/color/season 这些渲染和后端必需字段
  * （后端 wear_log 按 item_ids 从库取最新值写 items_snapshot；选择页 UI 靠这些精简字段）
+ *
+ * collage：手动搭配画布的布局（可选），[{ item_id, x, y, w, z }]，x/y/w 为相对画布边长的 0~1 比例。
+ *          随日记一起提交，时间轴按它还原拼贴效果。
  */
 import { defineStore } from 'pinia'
+
+function pickFields(item) {
+  return {
+    item_id: item.item_id,
+    image_url: item.image_url,
+    type: item.type,
+    color: item.color,
+    season: item.season
+  }
+}
 
 export const useOutfitStore = defineStore('outfit', {
   state: () => ({
     /** 已选中的衣物对象数组，元素形如：{ item_id, image_url, type, color, season } */
-    selectedItems: []
+    selectedItems: [],
+    /** 手动搭配画布布局；来自智能推荐时为 null */
+    collage: null
   }),
 
   getters: {
@@ -34,18 +49,19 @@ export const useOutfitStore = defineStore('outfit', {
         this.selectedItems.splice(idx, 1)
       } else {
         // 仅保留跨页渲染必需字段，减少 store 体积
-        this.selectedItems.push({
-          item_id: item.item_id,
-          image_url: item.image_url,
-          type: item.type,
-          color: item.color,
-          season: item.season
-        })
+        this.selectedItems.push(pickFields(item))
       }
+    },
+
+    /** 一次性设置整套搭配（智能推荐 / 手动搭配画布用） */
+    setOutfit(items, collage = null) {
+      this.selectedItems = items.map(pickFields)
+      this.collage = collage && collage.length ? collage : null
     },
 
     clearSelected() {
       this.selectedItems = []
+      this.collage = null
     }
   }
 })

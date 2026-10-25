@@ -13,7 +13,7 @@ from app.extensions import db
 from app.models.item import Item
 
 # 允许的字段取值（与 schema.sql 注释保持一致）
-ALLOWED_TYPES = {'上装', '下装', '外套', '鞋子', '配饰'}
+ALLOWED_TYPES = {'上装', '下装', '连衣裙', '外套', '鞋子', '包包', '帽子', '配饰'}
 ALLOWED_SEASONS = {'春', '夏', '秋', '冬', '全季'}
 ALLOWED_OCCASIONS = {'日常', '工作', '运动', '正式'}
 ALLOWED_STATUS = {'正常', '洗衣中', '收纳中'}
@@ -53,6 +53,7 @@ class ItemService:
         item_type: Optional[str] = None,
         color: Optional[str] = None,
         season: Optional[str] = None,
+        occasion: Optional[str] = None,
         page: int = 1,
         per_page: int = 10,
     ) -> Tuple[List[Item], int]:
@@ -69,6 +70,8 @@ class ItemService:
             query = query.filter(Item.color == color)
         if season:
             query = query.filter(Item.season == season)
+        if occasion:
+            query = query.filter(Item.occasion == occasion)
 
         query = query.order_by(Item.created_at.desc(), Item.id.desc())
 

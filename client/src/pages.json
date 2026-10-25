@@ -35,6 +35,14 @@
       }
     },
     {
+      "path": "pages/outfit/canvas",
+      "style": {
+        "navigationBarTitleText": "手动搭配",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
+      }
+    },
+    {
       "path": "pages/diary/create",
       "style": {
         "navigationBarTitleText": "轻量日记"
