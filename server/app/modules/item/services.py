@@ -8,6 +8,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.common.errors import ApiError
+from app.common.media import to_storage_path
 from app.extensions import db
 from app.models.item import Item
 
@@ -38,6 +39,8 @@ class ItemService:
 
         item = Item(user_id=user_id)
         ItemService._apply_fields(item, data, is_create=True)
+        if not item.season:
+            item.season = '全季'
 
         db.session.add(item)
         db.session.commit()
@@ -143,7 +146,8 @@ class ItemService:
                 value = (value or '').strip()
                 if not value:
                     raise ApiError('衣物图片不能为空', code=2002)
-                item.image_url = value
+                # 本站图片只存相对路径，换域名后不失效
+                item.image_url = to_storage_path(value)
 
             elif field == 'type':
                 value = (value or '').strip()
@@ -153,6 +157,8 @@ class ItemService:
 
             elif field == 'season':
                 value = (value or '').strip() or None
+                if is_create and not value:
+                    value = '全季'
                 if value is not None and value not in ALLOWED_SEASONS:
                     raise ApiError(f'季节不合法，可选：{"、".join(ALLOWED_SEASONS)}', code=2002)
                 item.season = value

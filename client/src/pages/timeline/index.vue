@@ -1,72 +1,93 @@
 <script setup>
 /**
- * 穿搭时间轴页面
- * 功能：
- *   1. 按日期倒序分页展示所有 wear_log
- *   2. 下拉刷新（onPullDownRefresh）、上拉加载更多（onReachBottom）
- *   3. 点击卡片 → action sheet（编辑 / 删除）
- *   4. 空状态精致引导
+ * 穿搭日记时间轴
+ * 组件：DiaryTitle / ClipDateTab / TiltLogCard / TaotaoFab / EmptyBook / AppTabBar
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import { get, del } from '@/utils/request'
 import { MOODS } from '@/utils/constants'
+import TaotaoSprite from '@/components/TaotaoSprite.vue'
+import AppTabBar from '@/components/AppTabBar.vue'
+import SafeImage from '@/components/SafeImage.vue'
+
+const STYLE_CHIPS = [
+  { t: '通勤', bg: '#dbeafe', c: '#2563eb' },
+  { t: '甜妹', bg: '#ffe4ed', c: '#e05690' },
+  { t: '休闲', bg: '#d8fbe6', c: '#2f9e63' }
+]
 
 const logs = ref([])
 const page = ref(1)
 const perPage = 10
 const total = ref(0)
 const loadingMore = ref(false)
+const loadError = ref(false)
+const booting = ref(true)
+const spinning = ref(false)
+const starred = ref({})
+const statusPad = (uni.getSystemInfoSync().statusBarHeight || 12) + 8
 
-// ---------- 工具函数 ----------
-
-/** 心情 label → emoji（没匹配上就原样返回） */
 function moodEmoji(label) {
-  if (!label) return ''
+  if (!label) return '😊'
   const found = MOODS.find((m) => m.label === label)
-  return found ? found.icon : label
+  return found ? found.icon : '😊'
 }
 
-/**
- * 日期格式化：今天 → "今天"，昨天 → "昨天"，同年 → "MM月DD日"，跨年 → "YYYY年MM月DD日"
- * @param {string} s YYYY-MM-DD
- */
 function friendlyDate(s) {
   if (!s) return ''
   const [y, m, d] = s.split('-').map(Number)
   const today = new Date()
-  const ty = today.getFullYear()
-  const tm = today.getMonth() + 1
-  const td = today.getDate()
-
-  if (y === ty && m === tm && d === td) return '今天'
-  // 昨天（跨月跨年也算）
   const yest = new Date(today.getTime() - 86400000)
+  if (y === today.getFullYear() && m === today.getMonth() + 1 && d === today.getDate()) return '今天'
   if (y === yest.getFullYear() && m === yest.getMonth() + 1 && d === yest.getDate()) return '昨天'
-  if (y === ty) return `${m}月${d}日`
+  if (y === today.getFullYear()) return `${m}月${d}日`
   return `${y}年${m}月${d}日`
 }
 
-// ---------- 数据加载 ----------
+function chipsFor(id) {
+  const n = Number(id) || 0
+  const a = STYLE_CHIPS[n % 3]
+  const b = STYLE_CHIPS[(n + 1) % 3]
+  return n % 2 === 0 ? [a, b] : [a, b, STYLE_CHIPS[(n + 2) % 3]]
+}
+
+function decoFor(id) {
+  return Number(id) % 2 === 0 ? '🎀' : '✦'
+}
+
+function tiltFor(id) {
+  return Number(id) % 2 === 0 ? -1.2 : 1.1
+}
+
+const grouped = computed(() => {
+  const out = []
+  let last = ''
+  logs.value.forEach((log) => {
+    const label = friendlyDate(log.wear_date)
+    if (label !== last) {
+      out.push({ kind: 'date', label, key: 'd-' + log.wear_date })
+      last = label
+    }
+    out.push({ kind: 'log', log, key: log.log_id })
+  })
+  return out
+})
 
 async function fetchLogs(reset = true) {
-  if (reset) {
-    page.value = 1
-  } else if (loadingMore.value) {
-    return
-  }
+  if (reset) page.value = 1
+  else if (loadingMore.value) return
   loadingMore.value = !reset
+  loadError.value = false
   try {
-    const data = await get('/api/wear-logs', {
-      page: page.value,
-      per_page: perPage
-    })
+    const data = await get('/api/wear-logs', { page: page.value, per_page: perPage })
     total.value = data.total
     logs.value = reset ? data.list : logs.value.concat(data.list)
   } catch (e) {
-    // request.js 里已经 toast 过了
+    loadError.value = true
   } finally {
     loadingMore.value = false
+    booting.value = false
   }
 }
 
@@ -76,13 +97,17 @@ function loadMore() {
   fetchLogs(false)
 }
 
-function refresh() {
+onShow(() => { fetchLogs(true) })
+
+onPullDownRefresh(() => {
+  spinning.value = true
   fetchLogs(true).finally(() => {
+    spinning.value = false
     uni.stopPullDownRefresh()
   })
-}
+})
 
-// ---------- 卡片操作 ----------
+onReachBottom(() => { loadMore() })
 
 function onCardTap(log) {
   uni.showActionSheet({
@@ -102,283 +127,252 @@ function deleteLog(log) {
   uni.showModal({
     title: '确认删除',
     content: `删除「${friendlyDate(log.wear_date)}」的穿搭日记？`,
-    confirmColor: '#ff6b6b',
+    confirmColor: '#ff8fb1',
     success: async (res) => {
       if (!res.confirm) return
       try {
         await del(`/api/wear-logs/${log.log_id}`)
         uni.showToast({ title: '已删除', icon: 'success' })
         fetchLogs(true)
-      } catch (e) {
-        // request.js 已 toast
-      }
+      } catch (e) { /* toast */ }
     }
   })
+}
+
+function toggleStar(e, id) {
+  e.stopPropagation()
+  starred.value = { ...starred.value, [id]: !starred.value[id] }
 }
 
 function goRecord() {
   uni.navigateTo({ url: '/pages/outfit/select' })
 }
 
-// ---------- 生命周期 ----------
-
-onShow(() => {
-  fetchLogs(true)
-})
-
-onPullDownRefresh(() => {
-  refresh()
-})
-
-onReachBottom(() => {
-  loadMore()
-})
-
 const hasMore = computed(() => logs.value.length < total.value)
+const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.items[0].image_url) || ''
 </script>
 
 <template>
-  <view class="page">
-    <!-- 有数据：时间轴列表 -->
-    <view v-if="logs.length" class="list">
-      <view
-        v-for="log in logs"
-        :key="log.log_id"
-        class="card"
-        @click="onCardTap(log)"
-      >
-        <!-- 顶部：日期 + 天气温度 + 心情 -->
-        <view class="card-head">
-          <view class="date-block">
-            <view class="date-main">{{ friendlyDate(log.wear_date) }}</view>
-            <view class="date-sub" v-if="log.wear_date !== friendlyDate(log.wear_date)">
-              {{ log.wear_date }}
+  <view class="page" :style="{ paddingTop: statusPad + 'px' }">
+    <view v-if="spinning" class="spin-mask">
+      <TaotaoSprite mood="spin" :size="140" />
+      <view class="spin-txt">桃桃转圈刷新中…</view>
+    </view>
+
+    <view class="head">
+      <view class="title">穿搭日记📒</view>
+      <view class="sticker press-bounce" @click="fetchLogs(true)">✦ 刷新</view>
+    </view>
+
+    <view v-if="booting" class="empty"><view class="empty-d">加载中…</view></view>
+    <view v-else-if="logs.length" class="album">
+      <template v-for="row in grouped" :key="row.key">
+        <view v-if="row.kind === 'date'" class="date-tab">
+          <view class="clip">📎</view>
+          <text>{{ row.label }}</text>
+        </view>
+        <view
+          v-else
+          class="polaroid press-bounce"
+          :style="{ transform: 'rotate(' + tiltFor(row.log.log_id) + 'deg)' }"
+          @click="onCardTap(row.log)"
+        >
+          <view class="corner">{{ decoFor(row.log.log_id) }}</view>
+          <view class="preview">
+            <view class="cover"><SafeImage :src="coverOf(row.log)" /></view>
+            <view class="emo">{{ moodEmoji(row.log.mood) }}</view>
+          </view>
+          <view class="body">
+            <view class="chips">
+              <text
+                v-for="ch in chipsFor(row.log.log_id)"
+                :key="ch.t"
+                class="chip"
+                :style="{ background: ch.bg, color: ch.c }"
+              >{{ ch.t }}</text>
+            </view>
+            <view class="note">{{ row.log.content || '还没写一句话' }}</view>
+            <view class="ops">
+              <text class="op" :class="{ on: starred[row.log.log_id] }" @click.stop="toggleStar($event, row.log.log_id)">⭐</text>
+              <text class="op" @click.stop="editLog(row.log)">💬</text>
             </view>
           </view>
-
-          <view class="weather" v-if="log.weather || log.temperature != null">
-            <text v-if="log.weather" class="weather-item">{{ log.weather }}</text>
-            <text v-if="log.temperature != null" class="weather-item">{{ log.temperature }}℃</text>
-          </view>
-
-          <view v-if="log.mood" class="mood-chip">
-            <text class="mood-icon">{{ moodEmoji(log.mood) }}</text>
-            <text class="mood-label">{{ log.mood }}</text>
-          </view>
         </view>
-
-        <!-- 衣物缩略图 -->
-        <view v-if="log.items && log.items.length" class="items-grid">
-          <image
-            v-for="item in log.items"
-            :key="item.item_id"
-            :src="item.image_url"
-            mode="aspectFill"
-            class="thumb"
-          />
-        </view>
-
-        <!-- 一句话日记 -->
-        <view v-if="log.content" class="content">{{ log.content }}</view>
-
-        <!-- 现场照片 -->
-        <view v-if="log.photo_url" class="photo-wrap">
-          <image :src="log.photo_url" mode="widthFix" class="photo" />
-        </view>
-      </view>
-
-      <!-- 加载更多 -->
-      <view v-if="hasMore" class="load-more" @click="loadMore">
-        {{ loadingMore ? '加载中...' : '加载更多' }}
-      </view>
-      <view v-else-if="logs.length" class="no-more">—— 到底啦 ——</view>
+      </template>
+      <view v-if="hasMore" class="more" @click="loadMore">{{ loadingMore ? '加载中...' : '加载更多' }}</view>
+      <view v-else class="more">—— 到底啦 ——</view>
     </view>
 
-    <!-- 空状态 -->
+    <view v-else-if="loadError" class="empty">
+      <TaotaoSprite mood="book" :size="160" />
+      <view class="empty-t">日记加载失败</view>
+      <view class="empty-d">点下面让桃桃再试一次</view>
+      <button class="btn-primary" style="margin-top:24rpx;width:280rpx" @click="fetchLogs(true)">重试</button>
+    </view>
     <view v-else class="empty">
-      <view class="empty-icon">👕</view>
-      <view class="empty-title">还没有穿搭记录</view>
-      <view class="empty-desc">选两件今天穿的衣物，留下第一条穿搭日记吧</view>
-      <button class="btn-primary empty-btn" @click="goRecord">去记录今日穿搭</button>
+      <TaotaoSprite mood="book" :size="180" />
+      <view class="empty-t">快来写下你的第一套穿搭日记吧！</view>
+      <view class="empty-d">桃桃举着空白手账本等你～</view>
     </view>
+
+    <view class="fab press-bounce" @click="goRecord">
+      <TaotaoSprite mood="fab" :size="108" />
+    </view>
+
+    <AppTabBar current="diary" />
   </view>
 </template>
 
 <style scoped>
 .page {
   min-height: 100vh;
-  padding: 24rpx 24rpx 120rpx;
+  padding: 12rpx 24rpx 40rpx;
   box-sizing: border-box;
-  background: #f4f7fb;
+  position: relative;
 }
-
-/* ---------- 卡片 ---------- */
-.list {
+.spin-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(255, 248, 245, 0.72);
   display: flex;
   flex-direction: column;
-  gap: 24rpx;
+  align-items: center;
+  justify-content: center;
 }
-
-.card {
-  background: #ffffff;
-  border-radius: 24rpx;
-  padding: 28rpx;
-  box-shadow: 0 4rpx 24rpx rgba(61, 90, 128, 0.06);
-}
-
-.card-head {
+.spin-txt { margin-top: 12rpx; color: #ff8fb1; font-weight: 700; }
+.head {
   display: flex;
-  align-items: flex-start;
-  gap: 16rpx;
-  margin-bottom: 20rpx;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  margin-bottom: 16rpx;
 }
-
-.date-block {
-  flex: 0 0 auto;
-}
-
-.date-main {
-  font-size: 32rpx;
-  font-weight: 700;
-  color: #3d5a80;
-  line-height: 1.2;
-}
-
-.date-sub {
+.title { font-size: 40rpx; font-weight: 800; }
+.sticker {
+  position: absolute;
+  right: 0;
+  top: 0;
+  background: #fff4c8;
+  border: 2rpx dashed #ffd56b;
+  border-radius: 16rpx;
+  padding: 8rpx 16rpx;
   font-size: 20rpx;
-  color: #a4b0be;
-  margin-top: 4rpx;
+  transform: rotate(6deg);
 }
 
-.weather {
-  flex: 1;
+.date-tab {
+  position: relative;
+  width: 100%;
+  align-self: flex-start;
+  background: #fffdfb;
+  border: 2rpx dashed #f3b8c8;
+  border-radius: 12rpx;
+  padding: 8rpx 28rpx 8rpx 36rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  margin: 12rpx 0 8rpx 8rpx;
+  box-shadow: 0 6rpx 12rpx rgba(255,150,175,0.08);
+}
+.clip {
+  position: absolute;
+  left: -6rpx;
+  top: -10rpx;
+  font-size: 28rpx;
+  transform: rotate(-25deg);
+}
+
+.album {
   display: flex;
-  gap: 10rpx;
   flex-wrap: wrap;
-  padding-top: 6rpx;
+  gap: 12rpx 16rpx;
+  align-items: flex-start;
 }
-
-.weather-item {
-  font-size: 22rpx;
-  color: #7b8794;
-  background: #f1f5fa;
+.polaroid {
+  width: calc(50% - 10rpx);
+  background: #fffdfb;
+  border: 3rpx dashed #f3b8c8;
+  border-radius: 20rpx;
+  overflow: hidden;
+  margin: 8rpx 0 12rpx;
+  box-shadow: 0 10rpx 28rpx rgba(255, 150, 175, 0.1);
+  position: relative;
+  box-sizing: border-box;
+}
+.corner {
+  position: absolute;
+  right: 12rpx;
+  top: 12rpx;
+  z-index: 2;
+  font-size: 28rpx;
+}
+.preview { position: relative; height: 280rpx; background: #fff0f4; }
+.cover { width: 100%; height: 280rpx; }
+.cover.ph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 64rpx;
+  height: 280rpx;
+}
+.emo {
+  position: absolute;
+  right: 16rpx;
+  bottom: 16rpx;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 50%;
+  background: #fffdfb;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36rpx;
+  box-shadow: 0 6rpx 12rpx rgba(56,46,54,0.08);
+}
+.body { padding: 16rpx 20rpx 18rpx; }
+.chips { display: flex; flex-wrap: wrap; gap: 8rpx; }
+.chip {
+  font-size: 20rpx;
   padding: 4rpx 14rpx;
   border-radius: 999rpx;
+  font-weight: 700;
 }
-
-.mood-chip {
-  flex: 0 0 auto;
+.note {
+  margin-top: 10rpx;
+  font-size: 26rpx;
+  color: #382e36;
+}
+.ops {
+  margin-top: 8rpx;
   display: flex;
-  align-items: center;
-  gap: 6rpx;
-  background: linear-gradient(135deg, #e8f0ff, #f4f7fb);
-  padding: 8rpx 18rpx;
-  border-radius: 999rpx;
-}
-
-.mood-icon {
+  gap: 20rpx;
   font-size: 28rpx;
-  line-height: 1;
 }
+.op.on { filter: none; }
+.op { opacity: 0.7; }
 
-.mood-label {
-  font-size: 22rpx;
-  color: #5b8def;
-  font-weight: 500;
-}
-
-/* ---------- 衣物缩略图 ---------- */
-.items-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12rpx;
-}
-
-.thumb {
-  width: 128rpx;
-  height: 128rpx;
-  border-radius: 16rpx;
-  background: #eef3f9;
-}
-
-/* ---------- 一句话日记 ---------- */
-.content {
-  margin-top: 20rpx;
-  font-size: 28rpx;
-  color: #2b3441;
-  line-height: 1.7;
-  padding: 16rpx 20rpx;
-  background: #f8fafd;
-  border-radius: 16rpx;
-}
-
-/* ---------- 现场照片 ---------- */
-.photo-wrap {
-  margin-top: 20rpx;
-  border-radius: 16rpx;
-  overflow: hidden;
-  background: #eef3f9;
-}
-
-.photo {
-  width: 100%;
-  display: block;
-}
-
-/* ---------- 加载状态 ---------- */
-.load-more,
-.no-more {
-  text-align: center;
-  padding: 32rpx 0;
-  font-size: 24rpx;
-  color: #a4b0be;
-}
-
-/* ---------- 空状态 ---------- */
 .empty {
-  padding-top: 200rpx;
+  padding-top: 160rpx;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 16rpx;
 }
+.empty-t { margin-top: 16rpx; font-weight: 800; font-size: 30rpx; }
+.empty-d { margin-top: 8rpx; color: #8a7f88; font-size: 24rpx; }
 
-.empty-icon {
-  font-size: 120rpx;
-  line-height: 1;
+.fab {
+  position: fixed;
+  right: 28rpx;
+  bottom: 180rpx;
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffb3c9, #ff8fb1);
+  box-shadow: 0 12rpx 24rpx rgba(255, 143, 177, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 40;
 }
-
-.empty-title {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: #3d5a80;
-  margin-top: 24rpx;
-}
-
-.empty-desc {
-  font-size: 26rpx;
-  color: #7b8794;
-  text-align: center;
-  padding: 0 60rpx;
-  line-height: 1.6;
-}
-
-.empty-btn {
-  margin-top: 40rpx;
-}
-
-.btn-primary {
-  background: linear-gradient(135deg, #5b8def, #7aa2cc);
-  color: #ffffff;
-  font-size: 28rpx;
-  font-weight: 500;
-  border-radius: 999rpx;
-  padding: 20rpx 0;
-  width: 520rpx;
-  border: none;
-}
-
-.btn-primary::after {
-  border: none;
-}
+.more { text-align: center; color: #8a7f88; font-size: 22rpx; padding: 12rpx 0 24rpx; }
 </style>

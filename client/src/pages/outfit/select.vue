@@ -9,20 +9,23 @@ import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
+import SafeImage from '@/components/SafeImage.vue'
 
 const store = useOutfitStore()
 
 const items = ref([])
 const loading = ref(false)
+const loadError = ref(false)
 const perPage = 50
 
 async function fetchItems() {
   loading.value = true
+  loadError.value = false
   try {
     const data = await get('/api/items', { page: 1, per_page: perPage })
     items.value = data.list || []
   } catch (e) {
-    // 统一错误提示
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -62,14 +65,18 @@ onShow(() => {
       <view class="summary-title">已选 {{ selectedCount }} 件</view>
       <scroll-view scroll-x class="summary-list">
         <view v-for="it in store.selectedItems" :key="it.item_id" class="summary-chip">
-          <image :src="it.image_url" mode="aspectFill" class="chip-thumb" />
+          <view class="chip-thumb"><SafeImage :src="it.image_url" /></view>
           <view class="chip-label">{{ it.type }}</view>
         </view>
       </scroll-view>
     </view>
 
     <!-- 衣橱网格 -->
-    <view v-if="!items.length && !loading" class="empty">
+    <view v-if="loadError" class="empty">
+      加载失败
+      <button class="btn-ghost empty-btn" @click="fetchItems">重试</button>
+    </view>
+    <view v-else-if="!items.length && !loading" class="empty">
       还没有衣物
       <button class="btn-ghost empty-btn" @click="goAdd">去添加</button>
     </view>
@@ -82,7 +89,7 @@ onShow(() => {
         :class="{ selected: isSelected(item) }"
         @click="toggle(item)"
       >
-        <image :src="item.image_url" mode="aspectFill" class="thumb" />
+        <view class="thumb"><SafeImage :src="item.image_url" /></view>
         <view class="name">{{ item.type }}<text v-if="item.color"> · {{ item.color }}</text></view>
         <view class="meta">{{ item.season || '—' }}</view>
         <view v-if="isSelected(item)" class="check">✓</view>

@@ -6,13 +6,19 @@
     {
       "path": "pages/index/index",
       "style": {
-        "navigationBarTitleText": "今日推荐"
+        "navigationBarTitleText": "今日推荐",
+        "navigationStyle": "custom",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
       }
     },
     {
       "path": "pages/item/list",
       "style": {
         "navigationBarTitleText": "我的衣橱",
+        "navigationStyle": "custom",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5",
         "enablePullDownRefresh": true
       }
     },
@@ -37,7 +43,10 @@
     {
       "path": "pages/timeline/index",
       "style": {
-        "navigationBarTitleText": "穿搭时间轴",
+        "navigationBarTitleText": "穿搭日记",
+        "navigationStyle": "custom",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5",
         "enablePullDownRefresh": true
       }
     },
@@ -50,7 +59,10 @@
     {
       "path": "pages/mine/index",
       "style": {
-        "navigationBarTitleText": "我的"
+        "navigationBarTitleText": "我的小窝",
+        "navigationStyle": "custom",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
       }
     },
     {
@@ -67,9 +79,10 @@
     }
   ],
   "tabBar": {
-    "color": "#8a94a6",
-    "selectedColor": "#5b8def",
-    "backgroundColor": "#ffffff",
+    "custom": true,
+    "color": "#8A7F88",
+    "selectedColor": "#FF8FB1",
+    "backgroundColor": "#FFFDFB",
     "borderStyle": "white",
     "list": [
       {
@@ -93,7 +106,7 @@
   "globalStyle": {
     "navigationBarTextStyle": "black",
     "navigationBarTitleText": "智能衣橱",
-    "navigationBarBackgroundColor": "#ffffff",
-    "backgroundColor": "#f4f7fb"
+    "navigationBarBackgroundColor": "#FFF8F5",
+    "backgroundColor": "#FFF8F5"
   }
 }

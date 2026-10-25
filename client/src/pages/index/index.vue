@@ -1,31 +1,27 @@
 <script setup>
 /**
- * 首页 —— 今日推荐 + 穿搭状态 + 快捷入口
- *
- * 区块从上到下：
- *   1. 头部问候 + 今日日期
- *   2. 今日穿搭状态（已记录 / 未记录）
- *   3. 温度输入 + "获取今日推荐"按钮 + 横向 swiper 推荐卡片
- *   4. 快捷入口（去衣橱 / 去记录）
- *
- * 数据来源：
- *   - GET /api/wear-logs?page=1&per_page=1 → 判断今日是否已记录
- *   - GET /api/recommend?temperature=xx → 3 套今日推荐
+ * 首页｜今日推荐
+ * 组件：HeroGreet / CheckinNote / HeroRecommendCard / ShortcutNotes / AppTabBar
  */
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
+import TaotaoSprite from '@/components/TaotaoSprite.vue'
+import AppTabBar from '@/components/AppTabBar.vue'
+import SafeImage from '@/components/SafeImage.vue'
 
 const outfitStore = useOutfitStore()
+const statusPad = (uni.getSystemInfoSync().statusBarHeight || 12) + 8
 
-// ---------- 今日穿搭状态 ----------
 const todayRecorded = ref(false)
 const todayMood = ref('')
 const loadingStatus = ref(true)
+const statusError = ref(false)
 
 async function fetchTodayStatus() {
   loadingStatus.value = true
+  statusError.value = false
   try {
     const data = await get('/api/wear-logs', { page: 1, per_page: 1 })
     if (data.list && data.list.length) {
@@ -37,50 +33,80 @@ async function fetchTodayStatus() {
       todayRecorded.value = false
     }
   } catch (e) {
-    // request.js 已 toast
+    statusError.value = true
   } finally {
     loadingStatus.value = false
   }
 }
 
-// ---------- 今日推荐 ----------
-const temperature = ref(20)          // 默认 20℃，推荐接口必填
+const temperature = ref(20)
 const seasonLabel = ref('')
 const recommendList = ref([])
 const loadingRecommend = ref(false)
+const recError = ref(false)
+const comboIndex = ref(0)
+
+const currentCombo = computed(() => recommendList.value[comboIndex.value] || null)
+
+const matchScore = computed(() => {
+  const combo = currentCombo.value
+  if (!combo) return 0
+  const wears = (combo.items || []).reduce((s, it) => s + (it.wear_count || 0), 0)
+  return Math.min(98, Math.max(78, 94 - wears * 2 - comboIndex.value))
+})
+
+const taotaoCopy = computed(() => {
+  const combo = currentCombo.value
+  if (!combo) return ''
+  const types = (combo.items || []).map((it) => it.type).join('、')
+  const band = seasonLabel.value || '今天'
+  return `今天${temperature.value}℃很舒服，桃桃帮你挑了这套${band}轻薄通勤搭配，优先选了你穿得比较少的单品，不容易腻哦~（含：${types}）`
+})
 
 async function fetchRecommend() {
   loadingRecommend.value = true
+  recError.value = false
   try {
     const data = await get('/api/recommend', { temperature: temperature.value })
     seasonLabel.value = data.season_label || ''
     recommendList.value = data.list || []
+    comboIndex.value = 0
   } catch (e) {
-    // request.js 已 toast
+    recError.value = true
+    recommendList.value = []
   } finally {
     loadingRecommend.value = false
   }
 }
 
-// ---------- 快捷入口 ----------
+function bumpTemp(delta) {
+  const n = Number(temperature.value)
+  const next = Math.min(60, Math.max(-50, (Number.isFinite(n) ? n : 20) + delta))
+  temperature.value = next
+  fetchRecommend()
+}
+
+function shuffleCombo() {
+  if (loadingRecommend.value) return
+  if (recommendList.value.length > 1) {
+    comboIndex.value = (comboIndex.value + 1) % recommendList.value.length
+    return
+  }
+  fetchRecommend()
+}
 
 function goRecord() {
   uni.navigateTo({ url: '/pages/outfit/select' })
 }
-
 function goWardrobe() {
   uni.switchTab({ url: '/pages/item/list' })
 }
-
 function goTimeline() {
   uni.switchTab({ url: '/pages/timeline/index' })
 }
 
-/**
- * "用这套去记录" —— 把推荐搭配塞到 outfit store，直接跳日记创建页
- * 跳过 outfit/select 的手动选择，给用户一个"一键用这套"的快捷路径
- */
 function useThisCombo(combo) {
+  if (!combo) return
   outfitStore.clearSelected()
   combo.items.forEach((it) => {
     outfitStore.selectedItems.push({
@@ -94,477 +120,393 @@ function useThisCombo(combo) {
   uni.navigateTo({ url: '/pages/diary/create' })
 }
 
-// ---------- 生命周期 ----------
-
 onShow(() => {
   fetchTodayStatus()
   fetchRecommend()
 })
 
-// ---------- 计算属性 ----------
-const today = computed(() => {
+const todayLine = computed(() => {
   const d = new Date()
-  const w = ['日', '一', '二', '三', '四', '五', '六'][d.getDay()]
-  return `${d.getMonth() + 1}月${d.getDate()}日 · 星期${w}`
+  return `今天是 ${d.getMonth() + 1}月${d.getDate()}日`
 })
 </script>
 
 <template>
   <view class="page">
-    <!-- 1. 头部 -->
-    <view class="header">
-      <view class="hello">你好 👋</view>
-      <view class="today">{{ today }}</view>
+    <!-- 装饰：星光云朵 -->
+    <view class="deco cloud a">☁</view>
+    <view class="deco star a">✦</view>
+    <view class="deco star b">✧</view>
+    <view class="deco heart">♡</view>
+    <view class="deco bow">🎀</view>
+
+    <!-- HeroGreet：奶桃转浅橙问候 -->
+    <view class="hero" :style="{ paddingTop: statusPad + 'px' }">
+      <view class="hero-row">
+        <TaotaoSprite mood="wave" :size="168" />
+        <view class="greet">
+          <view class="hi">哈喽～</view>
+          <view class="meta">{{ todayLine }}</view>
+          <view class="temp-row">
+            <text>室外</text>
+            <text class="temp-btn" @click="bumpTemp(-1)">−</text>
+            <input class="temp" type="digit" v-model="temperature" @blur="fetchRecommend" />
+            <text class="temp-btn" @click="bumpTemp(1)">+</text>
+            <text>℃</text>
+          </view>
+        </view>
+        <view v-if="seasonLabel" class="season-sticker">适合{{ seasonLabel }}穿搭</view>
+      </view>
     </view>
 
-    <!-- 2. 今日穿搭状态 -->
-    <view v-if="!loadingStatus" class="status-card" :class="{ done: todayRecorded }">
-      <view class="status-left">
-        <view class="status-icon">{{ todayRecorded ? '✅' : '📝' }}</view>
-        <view class="status-text">
-          <view class="status-title">
-            {{ todayRecorded ? '今日穿搭已记录' : '今日穿搭还没记录' }}
-            <text v-if="todayRecorded && todayMood" class="status-mood">· {{ todayMood }}</text>
-          </view>
-          <view class="status-desc">
-            {{ todayRecorded ? '去时间轴回顾一下吧' : '选两件今天穿的衣物，花 10 秒写一条' }}
-          </view>
-        </view>
-      </view>
-      <view class="status-btn" @click="todayRecorded ? goTimeline() : goRecord()">
-        {{ todayRecorded ? '查看时间轴' : '去记录 →' }}
-      </view>
+    <!-- CheckinNote：薄荷绿打卡条 -->
+    <view v-if="statusError" class="checkin press-bounce" @click="fetchTodayStatus">
+      <text class="check-ico">!</text>
+      <text class="check-txt">打卡状态加载失败，点这里重试</text>
+    </view>
+    <view
+      v-else-if="!loadingStatus"
+      class="checkin press-bounce"
+      @click="todayRecorded ? goTimeline() : goRecord()"
+    >
+      <text class="check-ico">{{ todayRecorded ? '✔' : '✎' }}</text>
+      <text class="check-txt">
+        {{ todayRecorded ? `今日穿搭打卡成功！${todayMood ? ' · ' + todayMood : ''}` : '今天还没打卡，桃桃等你来记一套～' }}
+      </text>
+      <text class="check-arrow">›</text>
     </view>
 
-    <!-- 3. 今日推荐 -->
-    <view class="section">
-      <view class="section-head">
-        <view class="section-title">
-          今日推荐
-          <text v-if="seasonLabel" class="season-tag">{{ seasonLabel }}</text>
-        </view>
-        <view class="temp-row">
-          <text class="temp-label">温度</text>
-          <input
-            class="temp-input"
-            type="digit"
-            v-model="temperature"
-            placeholder="20"
-            placeholder-class="ph"
-          />
-          <text class="temp-unit">℃</text>
-          <view class="refresh-btn" :class="{ disabled: loadingRecommend }" @click="fetchRecommend">
-            {{ loadingRecommend ? '推荐中' : '换一批' }}
-          </view>
-        </view>
+    <!-- HeroRecommendCard -->
+    <view v-if="currentCombo" class="hero-card">
+      <view class="tape" />
+      <view class="badge">✨ 桃桃智能推荐</view>
+      <view class="shuffle press-bounce" @click="shuffleCombo">
+        <TaotaoSprite mood="wink" :size="44" />
+        <text>{{ loadingRecommend ? '想…' : '换一批' }}</text>
       </view>
 
-      <!-- 有推荐：swiper 横向滑动 -->
-      <view v-if="recommendList.length" class="swiper-wrap">
-        <swiper
-          class="swiper"
-          :indicator-dots="recommendList.length > 1"
-          :autoplay="false"
-          :circular="recommendList.length > 1"
-          indicator-color="rgba(143,179,217,0.4)"
-          indicator-active-color="#5b8def"
+      <view class="pair">
+        <view
+          v-for="it in (currentCombo.items || []).slice(0, 2)"
+          :key="it.item_id"
+          class="polaroid"
         >
-          <swiper-item v-for="(combo, i) in recommendList" :key="i">
-            <view class="recommend-card">
-              <view class="recommend-head">
-                <text class="combo-label">推荐 {{ i + 1 }}</text>
-                <text class="combo-temp">{{ temperature }}℃</text>
-              </view>
-
-              <view class="combo-items">
-                <view v-for="item in combo.items" :key="item.item_id" class="combo-item">
-                  <image :src="item.image_url" mode="aspectFill" class="combo-thumb" />
-                  <view class="combo-meta">
-                    <text class="combo-type">{{ item.type }}</text>
-                    <text class="combo-color">{{ item.color || '—' }}</text>
-                  </view>
-                </view>
-              </view>
-
-              <view class="reason">{{ combo.reason }}</view>
-
-              <view class="use-btn" @click="useThisCombo(combo)">用这套去记录</view>
-            </view>
-          </swiper-item>
-        </swiper>
+          <view class="pair-img">
+            <SafeImage :src="it.image_url" />
+          </view>
+        </view>
       </view>
 
-      <!-- 无推荐：空状态引导 -->
-      <view v-else class="recommend-empty">
-        <view class="recommend-empty-icon">🧥</view>
-        <view class="recommend-empty-title">暂时生成不了推荐</view>
-        <view class="recommend-empty-desc">
-          衣橱里需要同时有「上装」和「下装」才能自动搭配
+      <view class="match">
+        <view class="bar">
+          <view class="fill" :style="{ width: matchScore + '%' }" />
+          <view class="star-end">★</view>
         </view>
-        <button class="btn-primary" @click="goWardrobe">去衣橱添加衣物</button>
+        <view class="match-label">匹配度 {{ matchScore }}%</view>
+      </view>
+
+      <view class="copy">{{ taotaoCopy }}</view>
+
+      <view class="cta press-bounce" @click="useThisCombo(currentCombo)">用这套去打卡</view>
+    </view>
+
+    <view v-else class="hero-card empty-rec">
+      <TaotaoSprite :mood="loadingRecommend ? 'spin' : 'closet'" :size="140" />
+      <view class="empty-title">{{ recError ? '推荐加载失败' : (loadingRecommend ? '桃桃转圈想搭配中…' : '暂时生成不了推荐') }}</view>
+      <view class="empty-desc">
+        {{ recError
+          ? '网络不稳定，点重试让桃桃再想一次。'
+          : '需要同时有「上装」和「下装」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。' }}
+      </view>
+      <view v-if="recError" class="cta ghost press-bounce" @click="fetchRecommend">重试</view>
+      <view v-else class="cta ghost press-bounce" @click="goWardrobe">去衣橱补季节</view>
+    </view>
+
+    <!-- ShortcutNotes -->
+    <view class="shortcuts">
+      <view class="note-btn left press-bounce" @click="goRecord">
+        <view class="nb-ico">✎</view>
+        <view class="nb-t">记录今日穿搭</view>
+      </view>
+      <view class="note-btn right press-bounce" @click="goWardrobe">
+        <view class="nb-ico">🧺</view>
+        <view class="nb-t">管理衣橱</view>
       </view>
     </view>
 
-    <!-- 4. 快捷入口 -->
-    <view class="quick-row">
-      <view class="quick-card" @click="goRecord">
-        <view class="quick-icon">📝</view>
-        <view class="quick-text">
-          <view class="quick-title">记录今日穿搭</view>
-          <view class="quick-desc">选衣物 + 一句话 + 心情</view>
-        </view>
-      </view>
-
-      <view class="quick-card" @click="goWardrobe">
-        <view class="quick-icon">👔</view>
-        <view class="quick-text">
-          <view class="quick-title">管理衣橱</view>
-          <view class="quick-desc">添衣物、看搭配</view>
-        </view>
-      </view>
-    </view>
+    <AppTabBar current="index" />
   </view>
 </template>
 
 <style scoped>
 .page {
   min-height: 100vh;
-  padding: 32rpx 24rpx 120rpx;
-  background: linear-gradient(180deg, #e8f0ff 0%, #f4f7fb 30%);
+  padding: 0 28rpx 40rpx;
   box-sizing: border-box;
+  position: relative;
+  overflow: hidden;
 }
-
-/* ---------- 头部 ---------- */
-.header {
-  padding: 16rpx 8rpx 32rpx;
+.deco {
+  position: absolute;
+  pointer-events: none;
+  opacity: 0.55;
+  z-index: 0;
 }
+.deco.cloud.a { top: 120rpx; right: 40rpx; font-size: 40rpx; color: #ffd0de; }
+.deco.star.a { top: 40rpx; right: 80rpx; color: #ffd56b; font-size: 28rpx; }
+.deco.star.b { top: 220rpx; left: 24rpx; color: #c4b5fd; font-size: 22rpx; }
+.deco.heart { top: 88rpx; right: 200rpx; color: #ff8fb1; }
+.deco.bow { bottom: 280rpx; right: 16rpx; font-size: 36rpx; transform: rotate(18deg); }
 
-.hello {
-  font-size: 44rpx;
-  font-weight: 700;
-  color: #3d5a80;
+.hero {
+  margin: 0 -28rpx;
+  padding: 16rpx 28rpx 48rpx;
+  background: linear-gradient(180deg, #ffd6e4 0%, #ffe3c8 55%, #fff8f5 100%);
+  position: relative;
+  z-index: 1;
 }
-
-.today {
-  font-size: 26rpx;
-  color: #7b8794;
-  margin-top: 8rpx;
-}
-
-/* ---------- 今日穿搭状态卡 ---------- */
-.status-card {
-  background: #ffffff;
-  border-radius: 28rpx;
-  padding: 28rpx;
+.hero-row {
   display: flex;
   align-items: center;
-  gap: 24rpx;
-  box-shadow: 0 8rpx 32rpx rgba(91, 141, 239, 0.1);
-  margin-bottom: 32rpx;
+  gap: 12rpx;
+  position: relative;
+}
+.greet { flex: 1; }
+.hi {
+  font-size: 52rpx;
+  font-weight: 800;
+  color: #382e36;
+  letter-spacing: 2rpx;
+}
+.meta {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #8a7f88;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.temp-row {
+  margin-top: 8rpx;
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  font-size: 22rpx;
+  color: #8a7f88;
+}
+.temp-btn {
+  width: 40rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  text-align: center;
+  border-radius: 50%;
+  background: #fffdfb;
+  border: 2rpx dashed #ffb3c9;
+  color: #ff8fb1;
+  font-size: 28rpx;
+}
+.temp {
+  width: 64rpx;
+  display: inline-block;
+  text-align: center;
+  border-bottom: 2rpx dashed #ff8fb1;
+  margin: 0 4rpx;
+  font-size: 22rpx;
+  color: #382e36;
+}
+.season-sticker {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: #fffdfb;
+  border: 2rpx dashed #ffb3c9;
+  border-radius: 999rpx;
+  padding: 8rpx 18rpx;
+  font-size: 20rpx;
+  color: #ff8fb1;
+  transform: rotate(4deg);
+  box-shadow: 0 8rpx 16rpx rgba(255, 150, 175, 0.12);
 }
 
-.status-card.done {
-  background: linear-gradient(135deg, #e8f7ed, #f4fff6);
-  box-shadow: 0 8rpx 32rpx rgba(78, 170, 110, 0.15);
+.checkin {
+  position: relative;
+  z-index: 1;
+  margin-top: -12rpx;
+  background: linear-gradient(90deg, #d8fbe6, #c5f6d8);
+  border: 2rpx dashed #8ee4af;
+  border-radius: 999rpx;
+  padding: 16rpx 24rpx;
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  transform: rotate(-0.8deg);
 }
+.check-ico { color: #2f9e63; font-weight: 700; }
+.check-txt { flex: 1; font-size: 24rpx; color: #382e36; font-weight: 600; }
+.check-arrow { color: #8a7f88; }
 
-.status-left {
-  flex: 1;
+.hero-card {
+  position: relative;
+  z-index: 1;
+  margin-top: 28rpx;
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 36rpx,
+      rgba(255, 180, 196, 0.18) 36rpx 37rpx
+    ),
+    #fffdfb;
+  border: 3rpx dashed #f3b8c8;
+  border-radius: 28rpx;
+  padding: 48rpx 28rpx 32rpx;
+  transform: rotate(-1.2deg);
+  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.14);
+}
+.tape {
+  position: absolute;
+  top: -14rpx;
+  left: 50%;
+  width: 120rpx;
+  height: 28rpx;
+  margin-left: -60rpx;
+  background: rgba(147, 197, 253, 0.45);
+  transform: rotate(-2deg);
+  border-radius: 4rpx;
+}
+.badge {
+  position: absolute;
+  top: -18rpx;
+  left: 24rpx;
+  background: linear-gradient(180deg, #ffe08a, #ffd56b);
+  color: #382e36;
+  font-size: 22rpx;
+  font-weight: 800;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  transform: rotate(-3deg);
+  box-shadow: 0 6rpx 12rpx rgba(255, 213, 107, 0.4);
+}
+.shuffle {
+  position: absolute;
+  top: 16rpx;
+  right: 16rpx;
+  background: #fffdfb;
+  border: 2rpx dashed #ffb3c9;
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx 4rpx 6rpx;
+  display: flex;
+  align-items: center;
+  gap: 4rpx;
+  font-size: 20rpx;
+  color: #ff8fb1;
+  transform: rotate(3deg);
+}
+.pair {
   display: flex;
   gap: 20rpx;
-  align-items: center;
+  margin-top: 36rpx;
+  justify-content: center;
 }
-
-.status-icon {
-  font-size: 56rpx;
-  line-height: 1;
+.polaroid {
+  padding: 10rpx 10rpx 22rpx;
+  background: #fff;
+  border-radius: 16rpx;
+  box-shadow: 0 8rpx 18rpx rgba(56, 46, 54, 0.08);
+  transform: rotate(-1.5deg);
 }
-
-.status-text {
-  flex: 1;
+.polaroid:nth-child(2) { transform: rotate(1.6deg); }
+.pair-img {
+  width: 220rpx;
+  height: 220rpx;
+  border-radius: 10rpx;
+  background: #fff0f4;
 }
-
-.status-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #3d5a80;
-}
-
-.status-mood {
-  font-size: 24rpx;
-  color: #5baa6e;
-  margin-left: 8rpx;
-}
-
-.status-desc {
-  font-size: 24rpx;
-  color: #7b8794;
-  margin-top: 8rpx;
-}
-
-.status-btn {
-  flex: 0 0 auto;
-  background: linear-gradient(135deg, #5b8def, #7aa2cc);
-  color: #ffffff;
-  font-size: 24rpx;
-  font-weight: 500;
-  padding: 14rpx 24rpx;
+.match { margin-top: 28rpx; }
+.bar {
+  height: 22rpx;
   border-radius: 999rpx;
+  background: #ffe4ed;
+  position: relative;
+  overflow: visible;
 }
-
-.status-card.done .status-btn {
-  background: linear-gradient(135deg, #5baa6e, #7cc48f);
+.fill {
+  height: 100%;
+  border-radius: 999rpx;
+  background: linear-gradient(90deg, #93c5fd, #c4b5fd 55%, #ff8fb1);
+  box-shadow: inset 0 -4rpx 0 rgba(255,255,255,0.4);
 }
-
-/* ---------- 推荐区块 ---------- */
-.section {
-  margin-bottom: 32rpx;
+.star-end {
+  position: absolute;
+  right: 8rpx;
+  top: -8rpx;
+  color: #ffd56b;
+  font-size: 28rpx;
 }
-
-.section-head {
-  padding: 0 8rpx 20rpx;
+.match-label {
+  text-align: center;
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #8a7f88;
+  font-weight: 600;
 }
-
-.section-title {
+.copy {
+  margin-top: 16rpx;
+  font-size: 24rpx;
+  color: #382e36;
+  line-height: 1.7;
+  text-align: center;
+  padding: 0 8rpx;
+}
+.cta {
+  margin-top: 24rpx;
+  height: 88rpx;
+  line-height: 88rpx;
+  text-align: center;
+  color: #fff;
   font-size: 32rpx;
   font-weight: 700;
-  color: #3d5a80;
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-}
-
-.season-tag {
-  font-size: 22rpx;
-  font-weight: 400;
-  background: #5b8def;
-  color: #ffffff;
-  padding: 4rpx 16rpx;
   border-radius: 999rpx;
+  background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
+  box-shadow: 0 10rpx 22rpx rgba(255, 143, 177, 0.38);
 }
-
-.temp-row {
-  display: flex;
-  align-items: center;
-  gap: 12rpx;
-  margin-top: 16rpx;
+.cta.ghost {
+  background: #fff8f5;
+  color: #ff8fb1;
+  border: 2rpx dashed #ffb3c9;
+  box-shadow: none;
 }
-
-.temp-label {
-  font-size: 24rpx;
-  color: #7b8794;
-}
-
-.temp-input {
-  width: 120rpx;
-  height: 56rpx;
-  background: #ffffff;
-  border: 1rpx solid #d7e0ea;
-  border-radius: 12rpx;
-  text-align: center;
-  font-size: 28rpx;
-  color: #2b3441;
-}
-
-.ph {
-  color: #a4b0be;
-}
-
-.temp-unit {
-  font-size: 24rpx;
-  color: #7b8794;
-}
-
-.refresh-btn {
-  background: #ffffff;
-  border: 1rpx solid #d7e0ea;
-  border-radius: 999rpx;
-  padding: 10rpx 24rpx;
-  font-size: 24rpx;
-  color: #5b8def;
-}
-
-.refresh-btn.disabled {
-  opacity: 0.6;
-}
-
-/* ---------- swiper ---------- */
-.swiper-wrap {
-  width: 100%;
-}
-
-.swiper {
-  width: 100%;
-  height: 620rpx;
-}
-
-.recommend-card {
-  height: 580rpx;
-  background: #ffffff;
-  border-radius: 28rpx;
-  padding: 28rpx;
-  box-sizing: border-box;
-  box-shadow: 0 8rpx 32rpx rgba(61, 90, 128, 0.08);
-  margin: 4rpx;
+.empty-rec {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  transform: rotate(0.8deg);
+}
+.empty-title { margin-top: 12rpx; font-weight: 700; font-size: 30rpx; }
+.empty-desc {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #8a7f88;
+  text-align: center;
+  line-height: 1.6;
 }
 
-.recommend-head {
+.shortcuts {
+  margin-top: 36rpx;
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 20rpx;
+  position: relative;
+  z-index: 1;
 }
-
-.combo-label {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #3d5a80;
-}
-
-.combo-temp {
-  font-size: 24rpx;
-  color: #5b8def;
-  background: #eef3f9;
-  padding: 6rpx 16rpx;
-  border-radius: 999rpx;
-}
-
-.combo-items {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 16rpx;
-}
-
-.combo-item {
-  width: 140rpx;
-}
-
-.combo-thumb {
-  width: 140rpx;
-  height: 140rpx;
-  border-radius: 16rpx;
-  background: #eef3f9;
-}
-
-.combo-meta {
-  margin-top: 6rpx;
-  display: flex;
-  flex-direction: column;
-}
-
-.combo-type {
-  font-size: 22rpx;
-  color: #2b3441;
-}
-
-.combo-color {
-  font-size: 20rpx;
-  color: #a4b0be;
-}
-
-.reason {
-  flex: 1;
-  margin-top: 20rpx;
-  padding: 16rpx 20rpx;
-  background: #f8fafd;
-  border-radius: 16rpx;
-  font-size: 24rpx;
-  color: #7b8794;
-  line-height: 1.6;
-}
-
-.use-btn {
-  margin-top: 20rpx;
-  text-align: center;
-  background: linear-gradient(135deg, #5b8def, #7aa2cc);
-  color: #ffffff;
-  font-size: 28rpx;
-  font-weight: 500;
-  padding: 22rpx 0;
-  border-radius: 999rpx;
-}
-
-/* ---------- 推荐空状态 ---------- */
-.recommend-empty {
-  background: #ffffff;
-  border-radius: 28rpx;
-  padding: 48rpx 32rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  box-shadow: 0 8rpx 32rpx rgba(61, 90, 128, 0.06);
-}
-
-.recommend-empty-icon {
-  font-size: 80rpx;
-  line-height: 1;
-}
-
-.recommend-empty-title {
-  font-size: 30rpx;
-  font-weight: 600;
-  color: #3d5a80;
-  margin-top: 20rpx;
-}
-
-.recommend-empty-desc {
-  font-size: 24rpx;
-  color: #7b8794;
-  text-align: center;
-  margin-top: 12rpx;
-  line-height: 1.6;
-  padding: 0 20rpx;
-}
-
-.btn-primary {
-  margin-top: 28rpx;
-  background: linear-gradient(135deg, #5b8def, #7aa2cc);
-  color: #ffffff;
-  font-size: 26rpx;
-  font-weight: 500;
-  border-radius: 999rpx;
-  padding: 18rpx 60rpx;
-  border: none;
-}
-
-.btn-primary::after {
-  border: none;
-}
-
-/* ---------- 快捷入口 ---------- */
-.quick-row {
-  display: flex;
-  gap: 20rpx;
-}
-
-.quick-card {
-  flex: 1;
-  background: #ffffff;
+.note-btn {
+  width: 46%;
+  background: #fffdfb;
+  border: 2rpx dashed #f3b8c8;
   border-radius: 24rpx;
-  padding: 28rpx;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  box-shadow: 0 4rpx 20rpx rgba(61, 90, 128, 0.05);
+  padding: 28rpx 20rpx;
+  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.1);
 }
-
-.quick-icon {
-  font-size: 48rpx;
-  line-height: 1;
-}
-
-.quick-title {
-  font-size: 28rpx;
-  font-weight: 600;
-  color: #3d5a80;
-  margin-top: 16rpx;
-}
-
-.quick-desc {
-  font-size: 22rpx;
-  color: #a4b0be;
-  margin-top: 6rpx;
-}
+.note-btn.left { transform: rotate(-1.5deg); }
+.note-btn.right { transform: rotate(1.4deg); margin-top: 28rpx; }
+.nb-ico { font-size: 36rpx; }
+.nb-t { margin-top: 10rpx; font-size: 26rpx; font-weight: 700; color: #382e36; }
 </style>

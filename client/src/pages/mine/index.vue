@@ -1,15 +1,29 @@
 <script setup>
-import { ref } from 'vue'
+/**
+ * 我的小窝
+ * 组件：NestTitle / AvatarNoteCard / JellyStatCards / MenuGrid / LogoutNote / AppTabBar
+ */
+import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user'
 import { get } from '@/utils/request'
+import TaotaoSprite from '@/components/TaotaoSprite.vue'
+import AppTabBar from '@/components/AppTabBar.vue'
 
 const userStore = useUserStore()
-
+const statusPad = (uni.getSystemInfoSync().statusBarHeight || 12) + 8
 const itemCount = ref(0)
 const logCount = ref(0)
+const loadError = ref(false)
+
+const tag = computed(() => {
+  if (logCount.value >= 8) return '穿搭达人'
+  if (logCount.value >= 3) return '穿搭进阶'
+  return '穿搭新手'
+})
 
 async function loadStat() {
+  loadError.value = false
   try {
     const [items, logs] = await Promise.all([
       get('/api/items', { page: 1, per_page: 1 }),
@@ -18,14 +32,21 @@ async function loadStat() {
     itemCount.value = items.total
     logCount.value = logs.total
   } catch (e) {
-    // 统一错误提示
+    loadError.value = true
   }
+}
+
+function goCloset() {
+  uni.switchTab({ url: '/pages/item/list' })
+}
+function goDiary() {
+  uni.switchTab({ url: '/pages/timeline/index' })
 }
 
 function onLogout() {
   uni.showModal({
-    title: '提示',
-    content: '确定要退出登录吗？',
+    title: '退出登录',
+    content: '桃桃会在小窝等你回来～确定退出吗？',
     success: (res) => {
       if (res.confirm) userStore.logout()
     }
@@ -41,79 +62,196 @@ onShow(() => {
 </script>
 
 <template>
-  <view class="container">
-    <view class="card profile">
-      <image
-        :src="userStore.userInfo?.avatar || 'https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=avatar%20placeholder&image_size=square'"
-        mode="aspectFill"
-        class="avatar"
-      />
-      <view class="info">
-        <view class="nickname">{{ userStore.userInfo?.nickname || '未登录' }}</view>
-        <view class="account">{{ userStore.userInfo?.username || '' }}</view>
+  <view class="page" :style="{ paddingTop: statusPad + 'px' }">
+    <view class="deco star">✦</view>
+    <view class="deco hang">♡</view>
+
+    <view class="title">我的小窝🥰</view>
+
+    <!-- AvatarNoteCard -->
+    <view class="avatar-card">
+      <view class="avatar-ring">
+        <image
+          v-if="userStore.userInfo?.avatar"
+          :src="userStore.userInfo.avatar"
+          class="avatar"
+          mode="aspectFill"
+        />
+        <view v-else class="avatar fallback">{{ (userStore.nickname || 'S').slice(0, 1) }}</view>
+      </view>
+      <view class="who">
+        <view class="name">{{ userStore.nickname || 'shary' }}</view>
+        <view class="tag">💛 {{ tag }}</view>
+        <view class="sub">桃桃陪你搭了 {{ logCount }} 套穿搭啦</view>
+      </view>
+      <view class="peek">
+        <TaotaoSprite mood="peek" :size="120" />
       </view>
     </view>
 
-    <view class="card stat">
-      <view class="stat-item">
+    <!-- JellyStatCards -->
+    <view v-if="loadError" class="logout press-bounce" @click="loadStat">统计加载失败，点此重试</view>
+
+    <view class="stats">
+      <view class="stat mint press-bounce" @click="goCloset">
         <view class="num">{{ itemCount }}</view>
-        <view class="stat-label">衣物</view>
+        <view class="lab">件宝贝衣服</view>
+        <view class="cap">我的衣物</view>
       </view>
-      <view class="divider"></view>
-      <view class="stat-item">
+      <view class="stat cheese press-bounce" @click="goDiary">
         <view class="num">{{ logCount }}</view>
-        <view class="stat-label">穿搭记录</view>
+        <view class="lab">套搭配日记</view>
+        <view class="cap">穿搭记录</view>
       </view>
     </view>
 
-    <button class="btn-ghost" @click="onLogout">退出登录</button>
+    <view class="logout press-bounce" @click="onLogout">退出登录</view>
+
+    <view class="floor-tt">
+      <TaotaoSprite mood="wink" :size="96" />
+    </view>
+
+    <AppTabBar current="mine" />
   </view>
 </template>
 
 <style scoped>
-.profile {
+.page {
+  min-height: 100vh;
+  padding: 16rpx 28rpx 40rpx;
+  box-sizing: border-box;
+  position: relative;
+}
+.deco.star {
+  position: absolute;
+  right: 48rpx;
+  top: 80rpx;
+  color: #ffd56b;
+  opacity: 0.7;
+}
+.deco.hang {
+  position: absolute;
+  left: 32rpx;
+  top: 88rpx;
+  color: #ff8fb1;
+  opacity: 0.5;
+}
+.title {
+  text-align: center;
+  font-size: 40rpx;
+  font-weight: 800;
+  color: #382e36;
+  margin-bottom: 24rpx;
+}
+
+.avatar-card {
+  position: relative;
+  background: #fffdfb;
+  border: 3rpx dashed #f3b8c8;
+  border-radius: 32rpx;
+  padding: 32rpx 28rpx 28rpx;
   display: flex;
   align-items: center;
   gap: 24rpx;
+  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.12);
+  overflow: hidden;
 }
-.avatar {
-  width: 120rpx;
-  height: 120rpx;
+.avatar-ring {
+  width: 128rpx;
+  height: 128rpx;
   border-radius: 50%;
-  background: #eef3f9;
+  padding: 8rpx;
+  background:
+    radial-gradient(circle at 30% 20%, #fff, transparent 40%),
+    repeating-conic-gradient(#ff8fb1 0 12deg, #ffd56b 12deg 18deg, #93c5fd 18deg 24deg, #8ee4af 24deg 30deg);
+  box-sizing: border-box;
 }
-.nickname {
-  font-size: 34rpx;
-  font-weight: 600;
-  color: #3d5a80;
+.avatar, .fallback {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: #ffe4ed;
 }
-.account {
-  margin-top: 8rpx;
-  font-size: 26rpx;
-  color: #a4b0be;
-}
-.stat {
+.fallback {
   display: flex;
   align-items: center;
-  justify-content: space-around;
-  text-align: center;
+  justify-content: center;
+  font-size: 48rpx;
+  font-weight: 800;
+  color: #ff8fb1;
 }
-.stat-item {
-  flex: 1;
-}
-.num {
-  font-size: 44rpx;
-  font-weight: 600;
-  color: #5b8def;
-}
-.stat-label {
+.name { font-size: 36rpx; font-weight: 800; }
+.tag {
+  display: inline-flex;
   margin-top: 8rpx;
-  font-size: 24rpx;
-  color: #7b8794;
+  background: #fff4c8;
+  border-radius: 999rpx;
+  padding: 4rpx 16rpx;
+  font-size: 20rpx;
+  color: #382e36;
 }
-.divider {
-  width: 1rpx;
-  height: 60rpx;
-  background: #eef3f9;
+.sub { margin-top: 8rpx; font-size: 22rpx; color: #8a7f88; }
+.peek {
+  position: absolute;
+  right: -8rpx;
+  bottom: -18rpx;
+}
+
+.stats {
+  margin-top: 28rpx;
+  display: flex;
+  gap: 20rpx;
+}
+.stat {
+  flex: 1;
+  border-radius: 48rpx;
+  padding: 28rpx 24rpx 22rpx;
+  box-shadow: 0 10rpx 36rpx rgba(255, 150, 175, 0.14);
+  color: #382e36;
+}
+.stat.mint { background: linear-gradient(160deg, #d8fbe6, #8ee4af); }
+.stat.cheese { background: linear-gradient(160deg, #ffeeb0, #ffd56b); }
+.num { font-size: 56rpx; font-weight: 800; line-height: 1; }
+.lab { margin-top: 8rpx; font-size: 22rpx; }
+.cap { margin-top: 12rpx; font-size: 20rpx; opacity: 0.7; }
+
+.grid {
+  margin-top: 32rpx;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20rpx;
+}
+.cell {
+  width: calc(50% - 10rpx);
+  background: #fffdfb;
+  border: 2rpx dashed #f3b8c8;
+  border-radius: 24rpx;
+  padding: 36rpx 20rpx;
+  box-sizing: border-box;
+  box-shadow: 0 8rpx 20rpx rgba(255, 150, 175, 0.08);
+}
+.cell.c1 { transform: rotate(-1.4deg); background: linear-gradient(180deg, #e8fff3, #fffdfb); }
+.cell.c2 { transform: rotate(1.2deg); background: linear-gradient(180deg, #fff6d4, #fffdfb); }
+.cell.c3 { transform: rotate(1.1deg); background: linear-gradient(180deg, #efe8ff, #fffdfb); }
+.cell.c4 { transform: rotate(-1.3deg); background: linear-gradient(180deg, #ffe8f0, #fffdfb); }
+.ico { font-size: 40rpx; }
+.ct { margin-top: 12rpx; font-size: 26rpx; font-weight: 700; }
+
+.logout {
+  margin: 40rpx 40rpx 0;
+  height: 84rpx;
+  line-height: 84rpx;
+  text-align: center;
+  border: 2rpx dashed #ffb3c9;
+  border-radius: 20rpx;
+  color: #ff8fb1;
+  background: #fff8f5;
+  font-size: 28rpx;
+}
+.floor-tt {
+  display: flex;
+  justify-content: flex-end;
+  padding-right: 24rpx;
+  margin-top: -20rpx;
 }
 </style>

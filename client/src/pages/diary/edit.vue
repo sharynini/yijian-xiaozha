@@ -10,6 +10,7 @@ import { MOODS } from '@/utils/constants'
 
 const logId = ref(null)
 const loading = ref(true)
+const loadError = ref(false)
 const saving = ref(false)
 
 // 表单字段
@@ -19,14 +20,14 @@ const content = ref('')
 
 async function loadDetail(id) {
   loading.value = true
+  loadError.value = false
   try {
     const data = await get(`/api/wear-logs/${id}`)
     detail.value = data
     selectedMood.value = data.mood || ''
     content.value = data.content || ''
   } catch (e) {
-    // request.js 已 toast
-    uni.navigateBack({ delta: 1 })
+    loadError.value = true
   } finally {
     loading.value = false
   }
@@ -40,6 +41,10 @@ const contentLen = computed(() => content.value.length)
 
 async function save() {
   if (saving.value) return
+  if (content.value.length > 100) {
+    uni.showToast({ title: '一句话最多 100 字', icon: 'none' })
+    return
+  }
   saving.value = true
   try {
     await put(`/api/wear-logs/${logId.value}`, {
@@ -71,6 +76,10 @@ onLoad((options) => {
   <view class="page">
     <!-- 加载中 -->
     <view v-if="loading" class="loading">加载中...</view>
+    <view v-else-if="loadError" class="loading">
+      加载失败
+      <button class="btn-primary" style="margin-top:24rpx;width:280rpx" @click="loadDetail(logId)">重试</button>
+    </view>
 
     <template v-else-if="detail">
       <!-- 顶部：搭配概览 -->
@@ -78,13 +87,14 @@ onLoad((options) => {
         <view class="section-title">今日穿搭</view>
         <view v-if="detail.items && detail.items.length" class="items-grid">
           <view v-for="item in detail.items" :key="item.item_id" class="item-box">
-            <image :src="item.image_url" mode="aspectFill" class="thumb" />
+            <view class="thumb"><SafeImage :src="item.image_url" /></view>
             <view class="item-meta">
               <text class="item-type">{{ item.type }}</text>
               <text class="item-color">{{ item.color || '—' }}</text>
             </view>
           </view>
         </view>
+        <view class="hint">照片和衣物不能在这里改。若要换一套，请在时间轴删除后重新打卡。</view>
         <view class="date-row">
           <text class="date-label">穿搭日期</text>
           <text class="date-val">{{ detail.wear_date }}</text>
@@ -168,6 +178,12 @@ onLoad((options) => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+.hint {
+  font-size: 22rpx;
+  color: #8a7f88;
+  line-height: 1.5;
+  margin-bottom: 16rpx;
 }
 
 .counter {

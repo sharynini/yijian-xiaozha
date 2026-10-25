@@ -2,12 +2,8 @@
 /**
  * 轻量穿搭日记页
  *
- * 两步提交（无论「跳过」还是「完成」）：
- *   1. POST /api/outfits           临时搭配，拿 outfit_id
- *   2. POST /api/wear-logs          记录今日穿搭（increase_wear_count: true）
- *
- * 后端模型允许 outfit_id = NULL（临时组合），但当前 WearLogService.create 强制要求
- * outfit_id，所以必须先建 outfit 再建 wear_log。临时搭配不命名，name 传 null。
+ * 「跳过」和「完成」都只调一次 POST /api/wear-logs（item_ids + 可选心情/一句话/照片）。
+ * 衣物来自 Pinia outfit store（首页「用这套」或 outfit/select 手动多选）。
  */
 import { ref } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
@@ -25,7 +21,7 @@ const uploading = ref(false)
 const submitting = ref(false)
 
 onLoad(() => {
-  // 理论上 store 在搭配选择页已经填好，这里兜底；空了就提示返回
+  // 理论上 store 在搭配选择页 / 首页「用这套」已经填好，这里兜底；空了就提示返回
   if (store.isEmpty) {
     uni.showToast({ title: '请先选衣物', icon: 'none' })
     setTimeout(() => uni.navigateBack(), 600)
@@ -34,7 +30,7 @@ onLoad(() => {
 
 // ---------- 现场照片 ----------
 function choosePhoto() {
-  if (uploading.value) return
+  if (uploading.value || submitting.value) return
   uni.chooseImage({
     count: 1,
     sizeType: ['compressed'],
@@ -65,7 +61,7 @@ function previewPhoto() {
 }
 
 // ---------- 提交 ----------
-async function submit(hasContent) {
+function submit() {
   if (store.isEmpty) {
     uni.showToast({ title: '请先选衣物', icon: 'none' })
     return
@@ -81,49 +77,34 @@ async function submit(hasContent) {
       cancelText: '不带照片',
       success: (r) => {
         if (r.cancel) {
-          // 用户选择不带照片：清空照片状态，后续流程照常
           photoUrl.value = ''
           previewPath.value = ''
-          _doSubmit(hasContent)
+          _doSubmit()
         }
       },
     })
     return
   }
 
-  _doSubmit(hasContent)
+  _doSubmit()
 }
 
-/** 真正执行提交（submit 做前置校验，这里做两步 API 串联） */
-async function _doSubmit(hasContent) {
+async function _doSubmit() {
+  if (submitting.value) return
   submitting.value = true
   uni.showLoading({ title: '记录中...', mask: true })
   try {
-    // Step 1: 先建临时搭配
-    const outfit = await post('/api/outfits', {
+    await post('/api/wear-logs', {
       item_ids: store.selectedItemIds,
-      name: null,
+      mood: selectedMood.value || null,
+      content: content.value.trim() || null,
+      photo_url: photoUrl.value || null,
+      increase_wear_count: true,
     })
 
-    // Step 2: 再建穿搭日记
-    const payload = {
-      outfit_id: outfit.outfit_id,
-      increase_wear_count: true,
-    }
-    if (hasContent) {
-      // 「完成」模式：只把用户实际填了的字段传给后端
-      payload.mood = selectedMood.value || null
-      payload.content = content.value.trim() || null
-      payload.photo_url = photoUrl.value || null
-    }
-
-    await post('/api/wear-logs', payload)
-
-    // 成功后清空 store 并跳到时间轴
     store.clearSelected()
     uni.hideLoading()
     uni.showToast({ title: '已记录今日穿搭', icon: 'success' })
-    // switchTab 用于 tabBar 页；延时保证 toast 可显
     setTimeout(() => uni.switchTab({ url: '/pages/timeline/index' }), 700)
   } catch (e) {
     // request.js 已经 toast 了具体原因，这里只需收尾
@@ -134,16 +115,15 @@ async function _doSubmit(hasContent) {
 }
 
 function skip() {
-  submit(false)
+  submit()
 }
 
 function finish() {
-  // 完成模式：允许 mood 留空，content 和 photo_url 都可以空串（后端统一转 null）
   if (content.value.length > 100) {
     uni.showToast({ title: '一句话最多 100 字', icon: 'none' })
     return
   }
-  submit(true)
+  submit()
 }
 </script>
 

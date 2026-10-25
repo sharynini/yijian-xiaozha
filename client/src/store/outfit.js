@@ -7,8 +7,7 @@
  *   3. 用户从日记页返回选择页时需要保留已选态（store 持续存活，不必重新加载）
  *
  * 传哪些字段：只传 item_id/image_url/type/color/season 这些渲染和后端必需字段
- * （后端 wear_log 创建时 outfit → items_snapshot 会从数据库取最新值，但选择页
- *   的 UI 展示必须靠这些精简字段，不能跨页再查一次）
+ * （后端 wear_log 按 item_ids 从库取最新值写 items_snapshot；选择页 UI 靠这些精简字段）
  */
 import { defineStore } from 'pinia'
 
@@ -19,7 +18,7 @@ export const useOutfitStore = defineStore('outfit', {
   }),
 
   getters: {
-    /** 仅 item_id 数组，直接喂给 POST /api/outfits 的 item_ids 字段 */
+    /** 仅 item_id 数组，直接喂给 POST /api/wear-logs 的 item_ids 字段 */
     selectedItemIds: (state) => state.selectedItems.map((it) => it.item_id),
     isEmpty: (state) => state.selectedItems.length === 0
   },

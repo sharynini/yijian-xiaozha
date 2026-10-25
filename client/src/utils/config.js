@@ -1,11 +1,13 @@
 /**
  * 全局配置
+ *
+ * BASE_URL 按 Vite 模式读取：
+ *   开发：client/.env.development 的 VITE_API_BASE
+ *   生产：client/.env.production 的 VITE_API_BASE
+ *   真机调试：复制为 .env.development.local（已 gitignore），写成电脑局域网 IP
  */
 
-// 后端接口基地址
-// - H5 / 浏览器调试：http://127.0.0.1:5001
-// - 微信小程序真机预览：需改为电脑局域网 IP，例如 http://172.20.10.8:5001
-export const BASE_URL = 'http://127.0.0.1:5001'
+export const BASE_URL = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:5001'
 
 // 本地缓存 key
 export const TOKEN_KEY = 'sw_token'

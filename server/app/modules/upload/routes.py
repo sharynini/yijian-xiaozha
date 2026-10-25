@@ -15,6 +15,7 @@ from flask import Blueprint, current_app, request, send_from_directory
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.common.errors import ApiError
+from app.common.media import UPLOAD_PREFIX, to_public_url
 from app.common.response import success
 
 upload_bp = Blueprint('upload', __name__)
@@ -35,7 +36,10 @@ def upload_image():
     上传图片
     Header: Authorization: Bearer <token>
     Body: multipart/form-data，文件字段名固定为 file
-    返回: { code: 0, data: { url: 'http://127.0.0.1:5001/uploads/1_ab12....jpg' } }
+    返回: { code: 0, data: {
+              url:  'http://127.0.0.1:5001/uploads/1_ab12....jpg',   # 完整地址，前端直接展示/提交
+              path: '/uploads/1_ab12....jpg'                          # 库里实际保存的相对路径
+          } }
     """
     user_id = int(get_jwt_identity())
 
@@ -54,9 +58,9 @@ def upload_image():
     filename = f'{user_id}_{uuid.uuid4().hex}.{ext}'
     file.save(os.path.join(upload_dir, filename))
 
-    # host_url 形如 http://127.0.0.1:5001/，拼接后即为可直接访问的绝对地址
-    url = f"{request.host_url.rstrip('/')}/uploads/{filename}"
-    return success(data={'url': url}, msg='上传成功')
+    # 库里只存相对路径；返回完整地址给前端展示（前端提交回来时后端会再转回相对路径）
+    path = f'{UPLOAD_PREFIX}{filename}'
+    return success(data={'url': to_public_url(path), 'path': path}, msg='上传成功')
 
 
 @upload_bp.get('/uploads/<path:filename>')

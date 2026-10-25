@@ -7,10 +7,11 @@ import os
 
 from dotenv import load_dotenv
 
-from app import create_app
+# 必须先加载 .env，再导入 app：config.py 在被导入时就会读取环境变量
+# （override=True 会覆盖系统已有的同名环境变量）
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env'), override=True)
 
-# 优先加载 .env 文件中的环境变量（override=True 会覆盖系统已有的同名环境变量）
-load_dotenv(override=True)
+from app import create_app  # noqa: E402
 
 app = create_app(os.getenv('FLASK_CONFIG', 'default'))
 

@@ -21,7 +21,7 @@ const submitting = ref(false)
 const form = ref({
   type: '',
   color: '',
-  season: '',
+  season: '全季',
   occasion: '',
   material: '',
   brand: '',
@@ -122,6 +122,10 @@ function validate() {
     uni.showToast({ title: '请选择衣物类型', icon: 'none' })
     return false
   }
+  if (!form.value.season) {
+    uni.showToast({ title: '请选择适用季节', icon: 'none' })
+    return false
+  }
   const price = String(form.value.price).trim()
   if (price !== '' && !/^\d+(\.\d{1,2})?$/.test(price)) {
     uni.showToast({ title: '价格需为数字，最多两位小数', icon: 'none' })
@@ -212,14 +216,14 @@ async function submit() {
         >{{ c }}</view>
       </view>
 
-      <view class="label mt">季节</view>
+      <view class="label mt">季节 <text class="required">*</text></view>
       <view class="tags">
         <view
           v-for="s in SEASONS"
           :key="s"
           class="tag"
           :class="{ active: form.season === s }"
-          @click="toggle('season', s)"
+          @click="form.season = s"
         >{{ s }}</view>
       </view>
 

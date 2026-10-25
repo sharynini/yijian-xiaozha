@@ -42,7 +42,8 @@ def create_log():
     POST /api/wear-logs
     Header: Authorization: Bearer <token>
     Body: {
-        "outfit_id": 1,                     # 必填
+        "item_ids": [1, 2, 3],              # 与 outfit_id 二选一；1~12 件，去重；优先于 outfit_id
+        "outfit_id": 1,                     # 选填，兼容旧客户端（未传 item_ids 时沿用旧逻辑）
         "wear_date": "2026-10-19",          # 选填，缺省今天
         "mood": "开心",                      # 选填
         "content": "今天天气很好",            # 选填

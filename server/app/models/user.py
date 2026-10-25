@@ -6,21 +6,31 @@ from datetime import datetime
 
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from app.common.media import to_public_url
 from app.extensions import db
 
 
 class User(db.Model):
     __tablename__ = 'user'
+    # 表结构（索引名、外键、注释）与 schema.sql / 线上 MySQL 保持一致，迁移工具以此为准
+    __table_args__ = (
+        db.UniqueConstraint('username', name='uk_username'),
+        db.UniqueConstraint('email', name='uk_email'),
+        db.Index('idx_deleted_at', 'deleted_at'),
+        {'comment': '用户表'},
+    )
 
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=True, comment='主键ID')
-    username = db.Column(db.String(50), unique=True, nullable=False, comment='登录用户名')
-    email = db.Column(db.String(100), unique=True, nullable=True, comment='邮箱地址')
-    password_hash = db.Column(db.String(255), nullable=False, comment='密码哈希')
+    username = db.Column(db.String(50), nullable=False, comment='登录用户名')
+    email = db.Column(db.String(100), nullable=True, comment='邮箱地址（选填）')
+    password_hash = db.Column(db.String(255), nullable=False, comment='密码哈希（如 bcrypt）')
     nickname = db.Column(db.String(50), nullable=True, comment='用户昵称')
     avatar = db.Column(db.String(500), nullable=True, comment='头像图片URL')
-    created_at = db.Column(db.DateTime, default=datetime.utcnow, comment='创建时间')
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment='更新时间')
-    deleted_at = db.Column(db.DateTime, nullable=True, comment='软删除时间')
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
+                           server_default=db.text('CURRENT_TIMESTAMP'), comment='创建时间')
+    updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow,
+                           server_default=db.text('CURRENT_TIMESTAMP'), comment='更新时间')
+    deleted_at = db.Column(db.DateTime, nullable=True, comment='软删除时间，NULL表示未删除')
 
     # ---------- 密码操作 ----------
     def set_password(self, raw_password: str) -> None:
@@ -39,7 +49,7 @@ class User(db.Model):
             'username': self.username,
             'email': self.email,
             'nickname': self.nickname,
-            'avatar': self.avatar,
+            'avatar': to_public_url(self.avatar),
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 

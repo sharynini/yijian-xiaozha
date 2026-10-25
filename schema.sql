@@ -98,7 +98,7 @@ CREATE TABLE `outfit_item` (
 CREATE TABLE `wear_log` (
     `id`              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_id`         BIGINT UNSIGNED     NOT NULL COMMENT '所属用户ID',
-    `outfit_id`       BIGINT UNSIGNED     DEFAULT NULL COMMENT '使用的搭配方案ID，NULL表示临时组合',
+    `outfit_id`       BIGINT UNSIGNED     DEFAULT NULL COMMENT '已保存搭配ID；日记主路径用 item_ids 写快照，此时为 NULL',
     `wear_date`       DATE                NOT NULL COMMENT '穿搭日期',
     `mood`            VARCHAR(10)         DEFAULT NULL COMMENT '心情：开心/平静/专注/疲惫/期待/低落/自信/随性',
     `content`         VARCHAR(500)        DEFAULT NULL COMMENT '一句话日记（选填）',

@@ -5,41 +5,52 @@
 """
 import os
 
+from sqlalchemy.pool import StaticPool
+
 
 def _build_mysql_uri() -> str:
-    """拼接 MySQL 连接串（PyMySQL 驱动，utf8mb4 编码）"""
-    user = os.getenv('DB_USER', 'root')
-    password = os.getenv('DB_PASSWORD', 'root')
+    """拼接 MySQL 连接串。账号口令必须来自环境变量，禁止代码内弱默认。"""
+    user = os.getenv('DB_USER')
+    password = os.getenv('DB_PASSWORD')
     host = os.getenv('DB_HOST', '127.0.0.1')
     port = os.getenv('DB_PORT', '3306')
     database = os.getenv('DB_NAME', 'smart_wardrobe')
+    if not user or password is None:
+        # 测试配置会覆盖 URI；非测试环境在 create_app 里还会再校验密钥
+        user = user or ''
+        password = password or ''
     return f'mysql+pymysql://{user}:{password}@{host}:{port}/{database}?charset=utf8mb4'
 
 
+def _upload_folder() -> str:
+    server_dir = os.path.dirname(os.path.abspath(__file__))
+    raw = (os.getenv('UPLOAD_FOLDER') or '').strip()
+    if not raw:
+        return os.path.join(server_dir, 'uploads')
+    return raw if os.path.isabs(raw) else os.path.abspath(os.path.join(server_dir, raw))
+
+
 class Config:
-    """基础配置（各环境通用）"""
-    # Flask
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-me')
-    JSON_AS_ASCII = False          # JSON 响应支持中文
+    """基础配置。SECRET_KEY / JWT_SECRET_KEY 必须从环境变量读取。"""
+    SECRET_KEY = os.getenv('SECRET_KEY')
+    JSON_AS_ASCII = False
     JSON_SORT_KEYS = False
 
-    # SQLAlchemy
     SQLALCHEMY_DATABASE_URI = _build_mysql_uri()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     SQLALCHEMY_ENGINE_OPTIONS = {
         'pool_size': 10,
-        'pool_recycle': 3600,      # 防止 MySQL 8 小时断连
-        'pool_pre_ping': True,     # 取连接前先探活
+        'pool_recycle': 3600,
+        'pool_pre_ping': True,
     }
 
-    # 文件上传（衣物图片）
-    # 落盘目录：server/uploads/；对外访问前缀：/uploads/
-    UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-    MAX_CONTENT_LENGTH = 5 * 1024 * 1024   # 单个请求体最大 5MB
+    UPLOAD_FOLDER = _upload_folder()
+    # 图片对外访问的域名前缀（如 https://api.example.com）；留空则用当前请求的域名
+    PUBLIC_BASE_URL = (os.getenv('PUBLIC_BASE_URL') or '').strip().rstrip('/')
+    MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
-    # JWT
-    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY', 'jwt-dev-secret-change-me')
-    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 60 * 60 * 24 * 7))  # 默认 7 天（秒）
+    JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
+    JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 60 * 60 * 24 * 7))
     JWT_TOKEN_LOCATION = ['headers']
     JWT_HEADER_NAME = 'Authorization'
     JWT_HEADER_TYPE = 'Bearer'
@@ -55,9 +66,24 @@ class ProductionConfig(Config):
     DEBUG = False
 
 
+class TestingConfig(Config):
+    """pytest 使用内存 SQLite，不连业务库"""
+    TESTING = True
+    DEBUG = True
+    SECRET_KEY = 'pytest-only-secret'
+    PUBLIC_BASE_URL = ''  # 测试固定用请求域名，不受本机环境变量影响
+    JWT_SECRET_KEY = 'pytest-only-jwt-secret'
+    SQLALCHEMY_DATABASE_URI = 'sqlite://'
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'connect_args': {'check_same_thread': False},
+        'poolclass': StaticPool,
+    }
+
+
 # 环境名 -> 配置类 映射
 config_map = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
+    'testing': TestingConfig,
     'default': DevelopmentConfig,
 }
