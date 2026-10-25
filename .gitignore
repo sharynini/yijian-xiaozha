@@ -25,3 +25,6 @@ backup*.sql
 .DS_Store
 .idea/
 .vscode/
+
+# Claude 生成的临时预览文件
+Claude outputs/
