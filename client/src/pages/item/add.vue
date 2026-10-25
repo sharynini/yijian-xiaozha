@@ -6,8 +6,15 @@
  *
  * 图片流程：uni.chooseImage 拿到本地临时路径 → 立即上传 POST /api/upload 换取服务器 URL
  *          → 提交时只把 image_url 传给 /api/items
+ *
+ * 抠图：新增衣物上传成功后先调用 POST /api/ai/cutout 去背景，抠好的透明 PNG 直接替换原图；
+ *       保存前可点「用回原图」反悔。编辑已有衣物时可点「一键抠图」补抠。
+ *
+ * AI 识别：抠图完成后自动调用 POST /api/ai/recognize-item（背景干净，识别更准），
+ *          把识别出的类型 / 颜色 / 季节 / 场合填进表单（带 ✨AI 标记，手动改过就去掉标记）。
+ *          编辑已有衣物时不自动识别，避免覆盖原信息，可手动点「再次识别」。
  */
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { get, post, put, del, uploadFile } from '@/utils/request'
 import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
@@ -18,6 +25,75 @@ const previewPath = ref('')   // 本地预览路径（选图后立即显示）
 const uploading = ref(false)
 const submitting = ref(false)
 const deleting = ref(false)
+
+// ---------- 抠图 ----------
+const cutting = ref(false)
+const originalUrl = ref('')     // 抠图前的原图地址，保存前可「用回原图」
+const cutoutTip = ref('')
+
+async function cutoutImage() {
+  if (!imageUrl.value || cutting.value) return false
+  cutting.value = true
+  cutoutTip.value = ''
+  try {
+    const data = await post('/api/ai/cutout', { image_url: imageUrl.value }, { silent: true })
+    if (!originalUrl.value) originalUrl.value = imageUrl.value
+    imageUrl.value = data.url
+    previewPath.value = data.url
+    cutoutTip.value = '✂️ 已去掉背景'
+    return true
+  } catch (e) {
+    cutoutTip.value = (e && e.msg) || '抠图失败，已保留原图'
+    return false
+  } finally {
+    cutting.value = false
+  }
+}
+
+function useOriginal() {
+  if (!originalUrl.value) return
+  imageUrl.value = originalUrl.value
+  previewPath.value = originalUrl.value
+  originalUrl.value = ''
+  cutoutTip.value = '已换回原图'
+}
+
+// 抠好的图都是 PNG：预览时用棋盘格衬底 + 完整显示
+const isCutout = computed(() => /\.png($|\?)/i.test(previewPath.value || ''))
+
+// ---------- AI 识别 ----------
+const AI_FIELDS = ['type', 'color', 'season', 'occasion']
+const recognizing = ref(false)
+const aiFilled = ref({})        // { type: true, ... } 哪些字段是 AI 填的
+const aiTip = ref('')           // 识别结果 / 失败原因的一行提示
+
+async function recognize() {
+  if (!imageUrl.value || recognizing.value || uploading.value || cutting.value) return
+  recognizing.value = true
+  aiTip.value = ''
+  try {
+    const data = await post('/api/ai/recognize-item', { image_url: imageUrl.value }, { silent: true })
+    const filled = {}
+    AI_FIELDS.forEach((key) => {
+      if (data[key]) {
+        form.value[key] = data[key]
+        filled[key] = true
+      }
+    })
+    aiFilled.value = filled
+    const n = Object.keys(filled).length
+    aiTip.value = n === AI_FIELDS.length
+      ? '✨ AI 已帮你填好，不对的地方点一下就能改'
+      : `✨ AI 认出了 ${n} 项，其余请手动选择`
+  } catch (e) {
+    aiFilled.value = {}
+    aiTip.value = (e && e.code === 8001)
+      ? 'AI 识别还没配置，先手动选择吧'
+      : ((e && e.msg) || 'AI 识别失败，请手动选择')
+  } finally {
+    recognizing.value = false
+  }
+}
 
 const form = ref({
   type: '',
@@ -67,11 +143,22 @@ function chooseImage() {
       const path = res.tempFilePaths[0]
       previewPath.value = path
       imageUrl.value = ''
+      originalUrl.value = ''
+      cutoutTip.value = ''
       uploading.value = true
       uni.showLoading({ title: '上传中...', mask: true })
       try {
         const data = await uploadFile(path)
         imageUrl.value = data.url
+        uploading.value = false
+        uni.hideLoading()
+        // 上传后先抠图（替换原图）；新增衣物再自动识别，编辑模式不自动识别以免覆盖原信息
+        await cutoutImage()
+        if (!editId.value) {
+          recognize()
+        } else {
+          aiTip.value = '换了新照片？可以点「再次识别」让 AI 重新填'
+        }
       } catch (e) {
         // 上传失败：保留 previewPath 让用户看到"选了但没传上去"，
         // 给三个选择：换一张 / 不带图提交 / 等网络好再试
@@ -107,6 +194,19 @@ function previewImage() {
 function toggle(field, value) {
   // 单选标签：再次点击可取消选择
   form.value[field] = form.value[field] === value ? '' : value
+  clearAiMark(field)
+}
+
+function setSeason(value) {
+  form.value.season = value
+  clearAiMark('season')
+}
+
+/** 用户手动改过的字段，去掉 ✨AI 标记 */
+function clearAiMark(field) {
+  if (aiFilled.value[field]) {
+    aiFilled.value = { ...aiFilled.value, [field]: false }
+  }
 }
 
 // ---------- 删除（仅编辑模式） ----------
@@ -136,6 +236,14 @@ function removeItem() {
 
 // ---------- 提交 ----------
 function validate() {
+  if (cutting.value) {
+    uni.showToast({ title: '正在抠图，请稍候', icon: 'none' })
+    return false
+  }
+  if (recognizing.value) {
+    uni.showToast({ title: 'AI 正在识别，请稍候', icon: 'none' })
+    return false
+  }
   if (uploading.value) {
     uni.showToast({ title: '图片上传中，请稍候', icon: 'none' })
     return false
@@ -207,20 +315,48 @@ async function submit() {
       </view>
 
       <view v-else class="preview">
-        <image class="preview-img" :src="previewPath" mode="aspectFill" @click="previewImage" />
+        <image
+          class="preview-img"
+          :class="{ cutout: isCutout }"
+          :src="previewPath"
+          :mode="isCutout ? 'aspectFit' : 'aspectFill'"
+          @click="previewImage"
+        />
         <view v-if="uploading" class="preview-mask">
           <text>上传中…</text>
+        </view>
+        <view v-else-if="cutting" class="preview-mask ai">
+          <text>✂️ 抠图中…</text>
+        </view>
+        <view v-else-if="recognizing" class="preview-mask ai">
+          <text>✨ AI 识别中…</text>
         </view>
         <view class="preview-ops">
           <text class="op" @click="chooseImage">重新选择</text>
           <text class="op" @click="previewImage">预览大图</text>
+          <text v-if="originalUrl" class="op warn" @click="useOriginal">抠坏了？用回原图</text>
+          <text
+            v-else-if="imageUrl && !cutting && !uploading"
+            class="op"
+            @click="cutoutImage"
+          >✂️ 一键抠图</text>
         </view>
+        <view v-if="cutoutTip" class="cutout-tip">{{ cutoutTip }}</view>
       </view>
     </view>
 
     <!-- 类型（必填）+ 颜色 + 季节 + 场合 -->
     <view class="card">
-      <view class="label">类型 <text class="required">*</text></view>
+      <view class="ai-bar">
+        <text class="ai-tip">{{ recognizing ? '✨ AI 正在看这件衣服…' : (aiTip || '上传照片后 AI 会自动识别下面四项') }}</text>
+        <text
+          class="ai-btn"
+          :class="{ off: !imageUrl || recognizing || uploading }"
+          @click="recognize"
+        >🔄 {{ recognizing ? '识别中' : '再次识别' }}</text>
+      </view>
+
+      <view class="label">类型 <text class="required">*</text><text v-if="aiFilled.type" class="ai-mark">✨AI</text></view>
       <view class="tags">
         <view
           v-for="t in ITEM_TYPES"
@@ -231,7 +367,7 @@ async function submit() {
         >{{ t }}</view>
       </view>
 
-      <view class="label mt">颜色</view>
+      <view class="label mt">颜色<text v-if="aiFilled.color" class="ai-mark">✨AI</text></view>
       <view class="tags">
         <view
           v-for="c in COLORS"
@@ -242,18 +378,18 @@ async function submit() {
         >{{ c }}</view>
       </view>
 
-      <view class="label mt">季节 <text class="required">*</text></view>
+      <view class="label mt">季节 <text class="required">*</text><text v-if="aiFilled.season" class="ai-mark">✨AI</text></view>
       <view class="tags">
         <view
           v-for="s in SEASONS"
           :key="s"
           class="tag"
           :class="{ active: form.season === s }"
-          @click="form.season = s"
+          @click="setSeason(s)"
         >{{ s }}</view>
       </view>
 
-      <view class="label mt">场合</view>
+      <view class="label mt">场合<text v-if="aiFilled.occasion" class="ai-mark">✨AI</text></view>
       <view class="tags">
         <view
           v-for="o in OCCASIONS"
@@ -286,7 +422,7 @@ async function submit() {
       />
     </view>
 
-    <button class="btn-primary" :disabled="submitting || uploading || deleting" @click="submit">
+    <button class="btn-primary" :disabled="submitting || uploading || cutting || recognizing || deleting" @click="submit">
       {{ submitting ? '提交中...' : (editId ? '保存修改' : '确认入库') }}
     </button>
     <button
@@ -353,6 +489,25 @@ async function submit() {
   align-items: center;
   justify-content: center;
 }
+/* 透明背景用棋盘格衬底，一眼看出已经抠图 */
+.preview-img.cutout {
+  background:
+    linear-gradient(45deg, #f6eef1 25%, transparent 25%, transparent 75%, #f6eef1 75%) 0 0 / 32rpx 32rpx,
+    linear-gradient(45deg, #f6eef1 25%, transparent 25%, transparent 75%, #f6eef1 75%) 16rpx 16rpx / 32rpx 32rpx,
+    #fffdfb;
+}
+.op.warn {
+  color: #e07a5f;
+}
+.cutout-tip {
+  margin-top: 10rpx;
+  font-size: 22rpx;
+  color: #c0607f;
+}
+.preview-mask.ai {
+  background: rgba(255, 143, 177, 0.45);
+  font-weight: 700;
+}
 .preview-ops {
   display: flex;
   gap: 32rpx;
@@ -361,6 +516,48 @@ async function submit() {
 .op {
   font-size: 26rpx;
   color: #5b8def;
+}
+
+/* ---------- AI 识别 ---------- */
+.ai-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin-bottom: 24rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: #fff5f8;
+  border: 2rpx dashed #ffc4d6;
+}
+.ai-tip {
+  flex: 1;
+  font-size: 22rpx;
+  color: #c0607f;
+  line-height: 1.5;
+}
+.ai-btn {
+  flex-shrink: 0;
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  background: #ff8fb1;
+  color: #fff;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+.ai-btn.off {
+  background: #f3dde4;
+  color: #fff;
+  pointer-events: none;
+}
+.ai-mark {
+  margin-left: 12rpx;
+  padding: 2rpx 10rpx;
+  border-radius: 999rpx;
+  background: #fff0f5;
+  color: #ff8fb1;
+  font-size: 20rpx;
+  font-weight: 700;
 }
 
 /* ---------- 标签选择 ---------- */

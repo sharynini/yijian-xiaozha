@@ -187,8 +187,9 @@ function goTimeline() {
 
 function useThisCombo(combo) {
   if (!combo) return
-  outfitStore.setOutfit(combo.items)
-  uni.navigateTo({ url: '/pages/diary/create' })
+  // 先到画布看效果（可换一套、可微调），再去打卡
+  outfitStore.setRecommend(recommendList.value, comboIndex.value)
+  uni.navigateTo({ url: '/pages/outfit/canvas?from=recommend' })
 }
 
 let weatherLoaded = false

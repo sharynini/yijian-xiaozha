@@ -5,6 +5,11 @@
  *   下：衣橱抽屉，按分类横向滑动，点一下把衣服放到画布上（再点一下从画布拿走）
  *   底部「用这套去打卡」→ 带着衣物和画布布局进入日记页，记录后出现在时间轴
  *
+ * 入口：
+ *   - /pages/outfit/canvas                 空白画布，自己搭
+ *   - /pages/outfit/canvas?from=recommend  首页智能推荐进入：按衣物类型自动摆好，
+ *                                          顶部多一个「换一套推荐」按钮
+ *
  * 用 movable-area / movable-view 实现拖动：H5 与微信小程序都原生支持，不引入新依赖。
  * 布局以「相对画布边长的比例」保存（x / y / w 都是 0~1），换屏幕尺寸也能还原。
  */
@@ -31,6 +36,85 @@ const side = Math.round(sys.windowWidth - 48 * rpx)
 // 每件：{ item_id, image_url, type, color, season, x, y, size, z }（x / y / size 单位 px）
 const pieces = ref([])
 const selectedId = ref(null)
+
+// ---------- 来自智能推荐 ----------
+const fromRecommend = ref(false)
+const touched = ref(false)       // 推荐摆好后，用户是否手动调整过
+
+/**
+ * 按衣物类型给出默认摆放位置（相对画布边长的比例）
+ * 上装 / 外套在上方，下装 / 连衣裙在中下方，鞋包帽配饰放四周
+ */
+const SLOT = {
+  外套: { x: 0.08, y: 0.03, w: 0.5, z: 1 },
+  上装: { x: 0.3, y: 0.06, w: 0.46, z: 2 },
+  连衣裙: { x: 0.28, y: 0.1, w: 0.56, z: 2 },
+  下装: { x: 0.3, y: 0.45, w: 0.46, z: 3 },
+  鞋子: { x: 0.66, y: 0.7, w: 0.3, z: 4 },
+  包包: { x: 0.04, y: 0.6, w: 0.32, z: 4 },
+  帽子: { x: 0.66, y: 0.02, w: 0.28, z: 5 },
+  配饰: { x: 0.04, y: 0.36, w: 0.26, z: 5 }
+}
+
+function layoutCombo(items) {
+  const used = {}
+  pieces.value = items.slice(0, MAX_PIECES).map((item, i) => {
+    const base = SLOT[item.type] || { x: 0.3, y: 0.3, w: 0.4, z: 1 }
+    const n = used[item.type] || 0          // 同类型多件时依次错开
+    used[item.type] = n + 1
+    const p = {
+      item_id: item.item_id,
+      image_url: item.image_url,
+      type: item.type,
+      color: item.color,
+      season: item.season,
+      size: Math.round(side * base.w),
+      x: side * base.x + n * 30,
+      y: side * base.y + n * 30,
+      z: base.z * 10 + i
+    }
+    clampPos(p)
+    return p
+  })
+  selectedId.value = null
+  touched.value = false
+}
+
+function showRecommend(index) {
+  const list = store.recommendList
+  if (!list.length) return
+  const i = ((index % list.length) + list.length) % list.length
+  store.recommendIndex = i
+  layoutCombo(list[i].items || [])
+}
+
+function nextRecommend() {
+  const list = store.recommendList
+  if (list.length <= 1) {
+    uni.showToast({ title: '目前只有这一套推荐哦', icon: 'none' })
+    return
+  }
+  const doSwitch = () => {
+    const next = store.recommendIndex + 1
+    if (next >= list.length) uni.showToast({ title: '已经是全部推荐啦，从第一套重新看', icon: 'none' })
+    showRecommend(next)
+  }
+  if (!touched.value) {
+    doSwitch()
+    return
+  }
+  uni.showModal({
+    title: '换一套推荐',
+    content: '换一套会丢掉你刚才的调整，确定吗？',
+    confirmColor: '#ff8fb1',
+    success: (res) => { if (res.confirm) doSwitch() }
+  })
+}
+
+const recommendLabel = computed(() => {
+  const n = store.recommendList.length
+  return n ? `推荐 ${store.recommendIndex + 1}/${n}` : ''
+})
 
 const selected = computed(() => pieces.value.find((p) => p.item_id === selectedId.value) || null)
 const onCanvasIds = computed(() => new Set(pieces.value.map((p) => p.item_id)))
@@ -67,9 +151,11 @@ function addPiece(item) {
   clampPos(piece)
   pieces.value.push(piece)
   selectedId.value = item.item_id
+  touched.value = true
 }
 
 function removePiece(itemId) {
+  touched.value = true
   pieces.value = pieces.value.filter((p) => p.item_id !== itemId)
   if (selectedId.value === itemId) selectedId.value = null
 }
@@ -83,6 +169,7 @@ function onMove(e, p) {
   if (e.detail.source !== 'touch' && e.detail.source !== 'touch-out-of-bounds') return
   p.x = e.detail.x
   p.y = e.detail.y
+  touched.value = true
 }
 
 function select(p) {
@@ -95,11 +182,15 @@ function resize(delta) {
   const next = Math.round(p.size + side * delta)
   p.size = Math.min(Math.max(next, side * MIN_RATIO), side * MAX_RATIO)
   clampPos(p)
+  touched.value = true
 }
 
 function bringToFront() {
   const p = selected.value
-  if (p) p.z = nextZ()
+  if (p) {
+    p.z = nextZ()
+    touched.value = true
+  }
 }
 
 function clearCanvas() {
@@ -112,6 +203,7 @@ function clearCanvas() {
       if (res.confirm) {
         pieces.value = []
         selectedId.value = null
+        touched.value = true
       }
     }
   })
@@ -144,8 +236,13 @@ async function loadShelf(type) {
   }
 }
 
-onLoad(() => {
+onLoad((query = {}) => {
   loadShelf('')
+  if (query.from === 'recommend' && store.recommendList.length) {
+    fromRecommend.value = true
+    uni.setNavigationBarTitle({ title: '推荐搭配' })
+    showRecommend(store.recommendIndex)
+  }
 })
 
 // ---------- 去打卡 ----------
@@ -174,6 +271,11 @@ function goAdd() {
 
 <template>
   <view class="page">
+    <view v-if="fromRecommend" class="rec-bar">
+      <text class="rec-label">✨ 桃桃{{ recommendLabel }}</text>
+      <view class="rec-btn" @click="nextRecommend">🔄 换一套推荐</view>
+    </view>
+
     <view class="tip-line">
       <text>拖动摆位置 · 点衣服可放大缩小</text>
       <text class="clear" :class="{ off: !pieces.length }" @click="clearCanvas">清空</text>
@@ -259,6 +361,29 @@ function goAdd() {
   padding: 16rpx 24rpx calc(150rpx + env(safe-area-inset-bottom));
   box-sizing: border-box;
   background: #fff8f5;
+}
+.rec-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14rpx;
+  padding: 14rpx 18rpx;
+  border-radius: 20rpx;
+  background: linear-gradient(90deg, #ffe4ed, #fff4c8);
+}
+.rec-label {
+  font-size: 26rpx;
+  font-weight: 800;
+  color: #382e36;
+}
+.rec-btn {
+  padding: 10rpx 24rpx;
+  border-radius: 999rpx;
+  background: #ff8fb1;
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 700;
+  box-shadow: 0 6rpx 14rpx rgba(255, 143, 177, 0.35);
 }
 .tip-line {
   display: flex;

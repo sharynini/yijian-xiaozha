@@ -51,6 +51,15 @@ class Config:
     # 和风天气（控制台 → 项目管理 获取）；未配置时首页退回手动调温度
     QWEATHER_API_KEY = os.getenv('QWEATHER_API_KEY', '')
     QWEATHER_API_HOST = os.getenv('QWEATHER_API_HOST', '')
+
+    # 阿里云百炼（通义千问视觉模型）；未配置时添加衣物页只能手动选择
+    DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY', '')
+    DASHSCOPE_BASE_URL = os.getenv('DASHSCOPE_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'
+    QWEN_VL_MODEL = os.getenv('QWEN_VL_MODEL') or 'qwen3-vl-plus'
+
+    # 本地抠图（rembg）：模型名与处理前缩放的最长边
+    REMBG_MODEL = os.getenv('REMBG_MODEL') or 'isnet-general-use'
+    CUTOUT_MAX_SIDE = int(os.getenv('CUTOUT_MAX_SIDE') or 1024)
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')

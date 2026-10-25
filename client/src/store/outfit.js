@@ -11,6 +11,9 @@
  *
  * collage：手动搭配画布的布局（可选），[{ item_id, x, y, w, z }]，x/y/w 为相对画布边长的 0~1 比例。
  *          随日记一起提交，时间轴按它还原拼贴效果。
+ *
+ * recommendList / recommendIndex：首页智能推荐的整批结果与当前看到第几套，
+ *          画布页「换一套推荐」按钮在这批结果里轮换。
  */
 import { defineStore } from 'pinia'
 
@@ -28,8 +31,12 @@ export const useOutfitStore = defineStore('outfit', {
   state: () => ({
     /** 已选中的衣物对象数组，元素形如：{ item_id, image_url, type, color, season } */
     selectedItems: [],
-    /** 手动搭配画布布局；来自智能推荐时为 null */
-    collage: null
+    /** 画布布局；提交日记时一起发给后端 */
+    collage: null,
+    /** 首页智能推荐的整批结果：[{ items: [...], reason }] */
+    recommendList: [],
+    /** 当前展示的是第几套推荐 */
+    recommendIndex: 0
   }),
 
   getters: {
@@ -57,6 +64,12 @@ export const useOutfitStore = defineStore('outfit', {
     setOutfit(items, collage = null) {
       this.selectedItems = items.map(pickFields)
       this.collage = collage && collage.length ? collage : null
+    },
+
+    /** 首页「用这套去打卡」：记下整批推荐，画布页据此展示并支持换一套 */
+    setRecommend(list, index = 0) {
+      this.recommendList = list || []
+      this.recommendIndex = index
     },
 
     clearSelected() {
