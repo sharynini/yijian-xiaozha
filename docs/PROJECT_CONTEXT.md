@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`）。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页。
 
 ---
 
@@ -73,7 +73,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 | 区段 | 模块 | 已用码 |
 |------|------|--------|
-| 1xxx | 认证 | 1001 用户名已存在；1002 邮箱已注册；1003 用户名或密码错误；1004 参数错误；1005 用户不存在或已删除；1006 微信登录未配置；1007 微信 code 无效或已使用；1008 微信服务异常 |
+| 1xxx | 认证 | 1001 用户名已存在；1002 邮箱已注册；1003 用户名或密码错误；1004 参数错误；1005 用户不存在或已删除；1006 微信登录未配置；1007 微信 code 无效或已使用；1008 微信服务异常；1009 注销失败 |
 | 2xxx | 衣物 | 2001 不存在；2002 参数不合法 |
 | 3xxx | 搭配 | 3001 搭配不存在 / 含无效衣物；3002 item_ids 参数错误 |
 | 4xxx | 穿搭日记 | 4001 不存在；4002 参数错误；4003 衣物不属于当前用户；4004 衣物已删除；4005 collage 结构错误 |
@@ -98,6 +98,14 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | POST | `/api/auth/login` | 否 | Body：`account`（用户名或邮箱）、`password` | `{ "access_token", "user" }` |
 | POST | `/api/auth/wx-login` | 否 | Body：`code`（小程序 `wx.login` 返回） | `{ "access_token", "user", "is_new" }` |
 | GET | `/api/auth/profile` | 是 | 无 | `User.to_dict()` |
+| DELETE | `/api/auth/account` | 是 | 无 | `{ deleted_files }`；`msg`「账号已注销」 |
+
+注销账号（`AuthService.delete_account`）：
+
+- **彻底删除**（不是软删除），不可恢复：同一事务内按 `user_id` 显式删除 `wear_log` → `outfit_item` → `outfit` → `item` → `user`，不依赖外键级联
+- 事务提交后删除上传目录里文件名以 `<user_id>_` 开头的全部图片（衣物照、抠图、现场照）；单个文件删除失败只记日志
+- 旧 token 立即失效：`common/errors.py` 注册了 `token_in_blocklist_loader`，每个需登录的请求按主键查一次用户，用户不存在或已软删除时返回 401「Token 已失效」
+- 注销后同一用户名、邮箱、微信 openid 可以重新注册（会是全新的空账号）
 
 微信一键登录（`auth/services.py`）：
 
@@ -107,7 +115,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 - 微信账号没有密码，不能走账号密码登录（`check_password` 对空哈希恒为 False）；暂不支持把已有账号密码用户与微信绑定
 - `User.to_dict()` 不返回 openid
 
-无注销账号、修改资料/密码、绑定微信接口。
+无修改资料/密码、绑定微信接口。
 
 ### 2.3 衣物（前缀 `/api/items`，均需 JWT）
 
@@ -314,6 +322,8 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | pages/mine/index | 我的小窝 | 我的 | 自定义导航栏 |
 | pages/login/login | 登录 | 否 | |
 | pages/register/register | 注册 | 否 | |
+| pages/legal/agreement | 用户协议 | 否 | 静态文本，含【待填写】占位 |
+| pages/legal/privacy | 隐私政策 | 否 | 静态文本，含【待填写】占位；须与小程序后台「用户隐私保护指引」一致 |
 
 `App.vue` 的 `onLaunch`：监听 `AUTH_EVENT`（`sw:auth-changed`）把静默登录结果同步到 Pinia；没有 token 时，小程序端后台静默 `wx.login`，不跳登录页；H5 端仍 `reLaunch` 到登录页。
 
@@ -323,7 +333,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 
 | 页面 | 接口 | 说明 |
 |------|------|------|
-| login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 成功后 `switchTab` 首页 |
+| login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 须先勾选同意《用户协议》《隐私政策》；成功后 `switchTab` 首页 |
 | register | `POST /api/auth/register` | 成功后返回登录页，不自动登录 |
 | index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend` | 天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
 | item/list | `GET /api/items`（筛选+分页）；`DELETE /api/items/:id` | 点卡片进 `item/add?id=` |
@@ -333,13 +343,13 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`increase_wear_count: true`） | 成功后清空 store，`switchTab` 时间轴；未传 temperature / weather |
 | timeline | `GET /api/wear-logs`；`DELETE /api/wear-logs/:id` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；编辑跳 `diary/edit?log_id=`；无详情页 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
-| mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total） | 退出只清本地状态 |
+| mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存 |
 
 前端未调用的后端能力：`/api/outfits/*`、测试接口、调试台。
 
 ### 4.3 前端状态与常量
 
-- `store/user.js`：token / userInfo，本地缓存 key 为 `sw_token` / `sw_user`；`wxLogin()` 手动微信登录；`logout()` 写入 `sw_manual_logout`
+- `store/user.js`：token / userInfo，本地缓存 key 为 `sw_token` / `sw_user`；`wxLogin()` 手动微信登录；`logout()` 写入 `sw_manual_logout`；`deleteAccount()` 注销并 `clearStorageSync`
 - `store/outfit.js`：`selectedItems`（跨页已选衣物，只保留 item_id/image_url/type/color/season）、`collage`、`recommendList` / `recommendIndex`（首页推荐整批结果，画布页轮换用）
 - `utils/constants.js`：类型/季节/场合/颜色/心情与后端枚举对齐
 
@@ -348,7 +358,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 - `appid` 为空（尚未注册小程序）
 - 已声明 `scope.userLocation`（用途说明：获取当地气温推荐穿搭）与 `requiredPrivateInfos: ["getLocation"]`
 - `urlCheck: false`（仅开发期可用，上线须配置合法域名）
-- 没有隐私授权弹窗处理（`wx.onNeedPrivacyAuthorization` 等）
+- `__usePrivacyCheck__: true`（基础库新版本默认开启隐私校验，此字段是否仍需要：待确认，保留无副作用）
+- 隐私授权弹窗：`components/PrivacyPopup.vue`，模块加载时注册一次 `wx.onNeedPrivacyAuthorization`，同意按钮为 `open-type="agreePrivacyAuthorization"`；已挂在会调用隐私接口的三个页面（index：`getLocation`；item/add、diary/create：`chooseImage`）。**以后新增调用隐私接口的页面，必须同样 import 并放置 `<PrivacyPopup />`**
+- 组件需在页面里手动 import：`easycom.autoscan` 只自动识别 `components/名称/名称.vue` 结构
 
 ---
 
@@ -359,7 +371,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | 项 | 现状 |
 |----|------|
 | 微信登录联调 | 代码已完成（静默登录、不强制跳登录页），需注册小程序后在 `server/.env` 配置 `WX_APPID` / `WX_APPSECRET`，并在 `manifest.json` 填 appid 后真机验证 |
-| 隐私合规 | 无隐私授权弹窗、无用户协议/隐私政策页、无注销账号与数据删除 |
+| 隐私合规 | 代码已完成；协议与政策中的【待填写】（运营者名称、联系邮箱、云服务商及地域、备份保留天数）需补全；小程序后台「用户隐私保护指引」需按隐私政策填写 |
 | 内容安全 | 日记文字、上传图片没有接入内容安全检测（是否必须：待确认） |
 | 生产部署 | 只有 Flask 开发服务器（`run.py`），无 WSGI 服务器、反向代理、HTTPS 配置；`ProductionConfig` 仅设 `DEBUG=False` |
 | 域名与 AppID | `client/.env.production` 中 `VITE_API_BASE` 为占位地址 `https://api.example.com`；`manifest.json` 的 `appid` 为空 |
@@ -440,4 +452,4 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 70 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 78 项通过）

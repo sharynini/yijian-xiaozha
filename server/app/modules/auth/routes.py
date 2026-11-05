@@ -81,3 +81,15 @@ def profile():
     user = AuthService.get_user_by_id(current_user_id)
 
     return success(data=user.to_dict())
+
+
+@auth_bp.delete('/account')
+@jwt_required()
+def delete_account():
+    """
+    注销账号：彻底删除当前用户的账号、衣物、搭配、日记和上传的图片，不可恢复
+    DELETE /api/auth/account
+    Header: Authorization: Bearer <token>
+    """
+    result = AuthService.delete_account(int(get_jwt_identity()))
+    return success(data=result, msg='账号已注销')

@@ -53,6 +53,47 @@ function onLogout() {
   })
 }
 
+function openLegal(name) {
+  uni.navigateTo({ url: `/pages/legal/${name}` })
+}
+
+function onDeleteAccount() {
+  uni.showModal({
+    title: '注销账号',
+    content: '注销后会立即彻底删除你的账号、全部衣物、搭配、日记和照片，无法恢复。确定继续吗？',
+    confirmText: '继续',
+    confirmColor: '#e5484d',
+    success: (res) => {
+      if (!res.confirm) return
+      // 必须等第一个弹窗关闭动画结束再弹第二个：在回调里立即调用，H5 端的第二个弹窗会被吞掉
+      setTimeout(confirmDeleteByTyping, 350)
+    }
+  })
+}
+
+function confirmDeleteByTyping() {
+  uni.showModal({
+    title: '最后确认',
+    editable: true,
+    placeholderText: '请输入「注销」两个字',
+    confirmText: '确认注销',
+    confirmColor: '#e5484d',
+    success: async (r) => {
+      if (!r.confirm) return
+      if ((r.content || '').trim() !== '注销') {
+        uni.showToast({ title: '输入不正确，已取消', icon: 'none' })
+        return
+      }
+      try {
+        await userStore.deleteAccount()
+        uni.showToast({ title: '账号已注销', icon: 'none' })
+      } catch (e) {
+        // request.js 已提示具体原因
+      }
+    }
+  })
+}
+
 onShow(() => {
   if (userStore.isLogin) {
     userStore.fetchProfile().catch(() => {})
@@ -106,6 +147,14 @@ onShow(() => {
     </view>
 
     <view class="logout press-bounce" @click="onLogout">退出登录</view>
+
+    <view class="legal-links">
+      <text class="legal-link" @click="openLegal('agreement')">用户协议</text>
+      <text class="legal-sep">·</text>
+      <text class="legal-link" @click="openLegal('privacy')">隐私政策</text>
+      <text class="legal-sep">·</text>
+      <text class="legal-link danger" @click="onDeleteAccount">注销账号</text>
+    </view>
 
     <view class="floor-tt">
       <TaotaoSprite mood="wink" :size="96" />
@@ -237,6 +286,24 @@ onShow(() => {
 .ico { font-size: 40rpx; }
 .ct { margin-top: 12rpx; font-size: 26rpx; font-weight: 700; }
 
+.legal-links {
+  margin-top: 28rpx;
+  text-align: center;
+  font-size: 24rpx;
+  color: #8a7f88;
+  position: relative;
+  z-index: 1;
+}
+.legal-link {
+  padding: 8rpx 4rpx;
+}
+.legal-link.danger {
+  color: #c45a6a;
+}
+.legal-sep {
+  margin: 0 12rpx;
+  color: #c9bec5;
+}
 .logout {
   margin: 40rpx 40rpx 0;
   height: 84rpx;

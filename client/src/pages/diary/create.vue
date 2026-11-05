@@ -11,6 +11,7 @@ import { post, uploadFile } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
 import { MOODS } from '@/utils/constants'
 import OutfitCollage from '@/components/OutfitCollage.vue'
+import PrivacyPopup from '@/components/PrivacyPopup.vue'
 
 const store = useOutfitStore()
 
@@ -198,6 +199,7 @@ function finish() {
       <button class="btn-primary action-btn" :disabled="submitting" @click="finish">完成</button>
     </view>
     <view class="actions-tip">跳过也会记录今日穿搭，稍后可在时间轴补充心情</view>
+    <PrivacyPopup />
   </view>
 </template>
 

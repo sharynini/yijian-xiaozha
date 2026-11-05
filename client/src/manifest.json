@@ -40,7 +40,8 @@
         "desc": "用于获取当地气温，推荐适合今天天气的穿搭"
       }
     },
-    "requiredPrivateInfos": ["getLocation"]
+    "requiredPrivateInfos": ["getLocation"],
+    "__usePrivacyCheck__": true
   },
   "mp-alipay": {
     "usingComponents": true

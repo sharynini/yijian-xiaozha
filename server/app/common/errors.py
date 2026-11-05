@@ -57,6 +57,21 @@ def register_error_handlers(app: Flask) -> None:
 def register_jwt_handlers(jwt) -> None:
     """JWT 相关错误统一为一致的响应格式"""
 
+    @jwt.token_in_blocklist_loader
+    def user_gone(jwt_header, jwt_payload):
+        """
+        账号已注销（被删除）或软删除时，旧 token 一律视为失效（返回 401「Token 已失效」）。
+        每个需登录的请求多一次按主键查询，开销很小。
+        """
+        from app.extensions import db
+        from app.models.user import User
+        try:
+            user_id = int(jwt_payload.get('sub'))
+        except (TypeError, ValueError):
+            return True
+        user = db.session.get(User, user_id)
+        return user is None or user.deleted_at is not None
+
     @jwt.unauthorized_loader
     def missing_token(reason):
         return jsonify(_body(401, f'缺少或非法的认证信息：{reason}')), 401

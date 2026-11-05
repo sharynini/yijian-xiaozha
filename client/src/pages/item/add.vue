@@ -18,6 +18,7 @@ import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
 import { get, post, put, del, uploadFile } from '@/utils/request'
 import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
+import PrivacyPopup from '@/components/PrivacyPopup.vue'
 
 const editId = ref(null)      // 非空即编辑模式
 const imageUrl = ref('')      // 上传成功后的服务器地址（提交用）
@@ -432,6 +433,7 @@ async function submit() {
       @click="removeItem"
     >{{ deleting ? '删除中...' : '删除衣物' }}</button>
     <view v-if="!editId" class="bottom-tip">照片会先上传到服务器，再提交衣物信息</view>
+    <PrivacyPopup />
   </view>
 </template>
 

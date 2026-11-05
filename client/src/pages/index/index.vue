@@ -11,6 +11,7 @@ import { useUserStore } from '@/store/user'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
+import PrivacyPopup from '@/components/PrivacyPopup.vue'
 
 const outfitStore = useOutfitStore()
 const userStore = useUserStore()
@@ -311,6 +312,7 @@ const todayLine = computed(() => {
     </view>
 
     <AppTabBar current="index" />
+    <PrivacyPopup />
   </view>
 </template>
 

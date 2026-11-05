@@ -84,6 +84,18 @@
       "style": {
         "navigationBarTitleText": "注册"
       }
+    },
+    {
+      "path": "pages/legal/agreement",
+      "style": {
+        "navigationBarTitleText": "用户协议"
+      }
+    },
+    {
+      "path": "pages/legal/privacy",
+      "style": {
+        "navigationBarTitleText": "隐私政策"
+      }
     }
   ],
   "tabBar": {

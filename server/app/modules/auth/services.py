@@ -4,6 +4,7 @@
 只处理业务规则，不处理 HTTP 请求/响应
 """
 import json
+import os
 import re
 import secrets
 import urllib.error
@@ -16,7 +17,10 @@ from flask_jwt_extended import create_access_token
 
 from app.common.errors import ApiError
 from app.extensions import db
+from app.models.item import Item
+from app.models.outfit import Outfit, OutfitItem
 from app.models.user import User
+from app.models.wear_log import WearLog
 
 # 邮箱正则（RFC 5322 简化版）
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
@@ -166,6 +170,62 @@ class AuthService:
             if not User.query.filter_by(username=candidate).first():
                 return candidate
         raise ApiError('创建账号失败，请重试', code=1008)
+
+    # ---------------- 注销账号 ----------------
+    @staticmethod
+    def delete_account(user_id: int) -> dict:
+        """
+        注销账号：彻底删除（不是软删除）该用户的全部数据，不可恢复
+          1. 同一事务内删除：日记 → 搭配关联 → 搭配 → 衣物 → 用户
+          2. 事务提交成功后，删除上传目录里该用户的全部图片（文件名以 <user_id>_ 开头）
+        不依赖数据库外键级联，显式按 user_id 删除，保证只删自己的数据
+        :return: { deleted_files: 删除的图片文件数 }
+        :raises ApiError: 1005 用户不存在
+        """
+        user = db.session.get(User, user_id)
+        if not user:
+            raise ApiError('用户不存在或已被删除', code=1005)
+
+        try:
+            outfit_ids = [row.id for row in Outfit.query.with_entities(Outfit.id).filter_by(user_id=user_id)]
+            item_ids = [row.id for row in Item.query.with_entities(Item.id).filter_by(user_id=user_id)]
+
+            WearLog.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+            if outfit_ids or item_ids:
+                OutfitItem.query.filter(
+                    db.or_(OutfitItem.outfit_id.in_(outfit_ids or [-1]), OutfitItem.item_id.in_(item_ids or [-1]))
+                ).delete(synchronize_session=False)
+            Outfit.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+            Item.query.filter_by(user_id=user_id).delete(synchronize_session=False)
+            db.session.delete(user)
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            current_app.logger.exception('注销账号失败 user_id=%s', user_id)
+            raise ApiError('注销失败，请稍后再试', code=1009)
+
+        return {'deleted_files': AuthService._delete_user_files(user_id)}
+
+    @staticmethod
+    def _delete_user_files(user_id: int) -> int:
+        """删除上传目录中以 <user_id>_ 开头的文件；单个文件删除失败只记日志，不影响注销结果"""
+        folder = current_app.config.get('UPLOAD_FOLDER')
+        if not folder or not os.path.isdir(folder):
+            return 0
+        prefix = f'{user_id}_'
+        count = 0
+        for name in os.listdir(folder):
+            if not name.startswith(prefix):
+                continue
+            path = os.path.join(folder, name)
+            if not os.path.isfile(path):
+                continue
+            try:
+                os.remove(path)
+                count += 1
+            except OSError as e:
+                current_app.logger.warning('注销时删除图片失败 %s：%s', name, type(e).__name__)
+        return count
 
     # ---------------- 获取当前用户 ----------------
     @staticmethod

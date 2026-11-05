@@ -3,7 +3,7 @@
  * 维护 token 与用户信息，并同步到本地缓存
  */
 import { defineStore } from 'pinia'
-import { post, get, wxSilentLogin } from '@/utils/request'
+import { post, get, del, wxSilentLogin } from '@/utils/request'
 import { TOKEN_KEY, USER_KEY, MANUAL_LOGOUT_KEY } from '@/utils/config'
 
 export const useUserStore = defineStore('user', {
@@ -67,6 +67,19 @@ export const useUserStore = defineStore('user', {
       this.userInfo = user
       uni.setStorageSync(USER_KEY, user)
       return user
+    },
+
+    /**
+     * 注销账号：后端彻底删除账号与全部数据；成功后清空本机所有缓存并回到登录页
+     * 小程序端同样记下「主动退出」，避免回到登录页后又被静默登录建出新账号
+     */
+    async deleteAccount() {
+      await del('/api/auth/account', {}, { loading: true, loadingText: '注销中...' })
+      this.token = ''
+      this.userInfo = null
+      uni.clearStorageSync()
+      uni.setStorageSync(MANUAL_LOGOUT_KEY, 1)
+      uni.reLaunch({ url: '/pages/login/login' })
     },
 
     /**
