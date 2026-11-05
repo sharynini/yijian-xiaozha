@@ -65,13 +65,15 @@ def create_log():
 def list_logs():
     """
     穿搭时间轴（按 wear_date 倒序分页）
-    GET /api/wear-logs?page=&per_page=
+    GET /api/wear-logs?page=&per_page=&date=
     Header: Authorization: Bearer <token>
+    date 选填（YYYY-MM-DD）：只返回这一天的记录
     """
     user_id = _current_user_id()
     page, per_page = _parse_pagination()
 
-    logs, total = WearLogService.list_logs(user_id=user_id, page=page, per_page=per_page)
+    logs, total = WearLogService.list_logs(user_id=user_id, page=page, per_page=per_page,
+                                           on_date=request.args.get('date'))
 
     return success(data={
         'total': total,

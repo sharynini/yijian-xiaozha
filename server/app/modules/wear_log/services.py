@@ -73,14 +73,24 @@ class WearLogService:
 
     # ---------------- 时间轴列表 ----------------
     @staticmethod
-    def list_logs(user_id: int, page: int = 1, per_page: int = 10) -> Tuple[List[WearLog], int]:
+    def list_logs(user_id: int, page: int = 1, per_page: int = 10,
+                  on_date: Any = None) -> Tuple[List[WearLog], int]:
         """
         时间轴：按 wear_date 倒序分页（同日期按创建时间倒序）
+        :param on_date: 选填，YYYY-MM-DD，只查这一天
         :return: (当前页数据, 总条数)
+        :raises ApiError: 4002 日期格式错误
         """
         query = WearLog.query.filter(
             WearLog.user_id == user_id, WearLog.deleted_at.is_(None)
-        ).order_by(WearLog.wear_date.desc(), WearLog.id.desc())
+        )
+        if on_date not in (None, ''):
+            try:
+                day = datetime.strptime(str(on_date).strip(), '%Y-%m-%d').date()
+            except ValueError:
+                raise ApiError('日期格式不正确，应为 YYYY-MM-DD', code=4002)
+            query = query.filter(WearLog.wear_date == day)
+        query = query.order_by(WearLog.wear_date.desc(), WearLog.id.desc())
 
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         return pagination.items, pagination.total

@@ -2,6 +2,10 @@
 /**
  * 穿搭日记时间轴
  * 组件：DiaryTitle / ClipDateTab / TiltLogCard / TaotaoFab / EmptyBook / AppTabBar
+ *
+ * 排列：按「月 → 日 → 小卡」三层分组，最新的在最前；每换一个月插入一个月份分段标题
+ * 筛选：标题左侧「📅 选日期」，选中后只请求这一天（GET /api/wear-logs?date=），点筛选标签的 ✕ 恢复全部
+ * 小卡交互在筛选前后一致：点卡片进详情，💬 进编辑，⭐ 收藏（仅页面内存）
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
@@ -35,15 +39,28 @@ function moodEmoji(label) {
   return found ? found.icon : '😊'
 }
 
-function friendlyDate(s) {
-  if (!s) return ''
+const WEEKDAYS = ['日', '一', '二', '三', '四', '五', '六']
+
+/** 本地日期 YYYY-MM-DD（不能用 toISOString，那是 UTC） */
+function localDateStr(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+}
+
+/** 日分组标题：「5日 周四 · 今天」 */
+function dayLabel(s) {
   const [y, m, d] = s.split('-').map(Number)
-  const today = new Date()
-  const yest = new Date(today.getTime() - 86400000)
-  if (y === today.getFullYear() && m === today.getMonth() + 1 && d === today.getDate()) return '今天'
-  if (y === yest.getFullYear() && m === yest.getMonth() + 1 && d === yest.getDate()) return '昨天'
-  if (y === today.getFullYear()) return `${m}月${d}日`
-  return `${y}年${m}月${d}日`
+  const week = WEEKDAYS[new Date(y, m - 1, d).getDay()]
+  const today = localDateStr()
+  const yesterday = localDateStr(new Date(Date.now() - 86400000))
+  const suffix = s === today ? ' · 今天' : (s === yesterday ? ' · 昨天' : '')
+  return `${d}日 周${week}${suffix}`
+}
+
+/** 筛选标签：同年显示「11月5日」，跨年带年份 */
+function shortDate(s) {
+  const [y, m, d] = s.split('-').map(Number)
+  return y === new Date().getFullYear() ? `${m}月${d}日` : `${y}年${m}月${d}日`
 }
 
 function chipsFor(id) {
@@ -61,34 +78,68 @@ function tiltFor(id) {
   return Number(id) % 2 === 0 ? -1.2 : 1.1
 }
 
+// 月 → 日 → 小卡；列表本身已按日期倒序，换月 / 换日时插入分段标题
 const grouped = computed(() => {
   const out = []
-  let last = ''
+  let lastMonth = ''
+  let lastDay = ''
   logs.value.forEach((log) => {
-    const label = friendlyDate(log.wear_date)
-    if (label !== last) {
-      out.push({ kind: 'date', label, key: 'd-' + log.wear_date })
-      last = label
+    const day = log.wear_date || ''
+    const month = day.slice(0, 7)
+    if (month !== lastMonth) {
+      const [y, m] = month.split('-').map(Number)
+      out.push({ kind: 'month', label: `${y}年${m}月`, key: 'm-' + month })
+      lastMonth = month
+    }
+    if (day !== lastDay) {
+      out.push({ kind: 'date', label: dayLabel(day), key: 'd-' + day })
+      lastDay = day
     }
     out.push({ kind: 'log', log, key: log.log_id })
   })
   return out
 })
 
+// ---------- 日期筛选 ----------
+const today = localDateStr()
+const filterDate = ref('')     // '' 表示不筛选
+
+function onPickDate(e) {
+  const value = e.detail.value
+  if (!value || value === filterDate.value) return
+  filterDate.value = value
+  fetchLogs(true)
+}
+
+function clearFilter() {
+  if (!filterDate.value) return
+  filterDate.value = ''
+  fetchLogs(true)
+}
+
+// 切换筛选时可能有旧请求还没回来：只采用最后一次请求的结果
+let requestSeq = 0
+
 async function fetchLogs(reset = true) {
   if (reset) page.value = 1
   else if (loadingMore.value) return
   loadingMore.value = !reset
   loadError.value = false
+  const seq = ++requestSeq
+  const params = { page: page.value, per_page: perPage }
+  if (filterDate.value) params.date = filterDate.value
   try {
-    const data = await get('/api/wear-logs', { page: page.value, per_page: perPage })
+    const data = await get('/api/wear-logs', params, { skipDedup: reset })
+    if (seq !== requestSeq) return
     total.value = data.total
     logs.value = reset ? data.list : logs.value.concat(data.list)
   } catch (e) {
-    loadError.value = true
+    if (seq === requestSeq) loadError.value = true
   } finally {
-    loadingMore.value = false
-    booting.value = false
+    if (seq === requestSeq) {
+      loadingMore.value = false
+      booting.value = false
+    }
   }
 }
 
@@ -140,14 +191,25 @@ const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.it
     </view>
 
     <view class="head">
+      <picker mode="date" :value="filterDate || today" :end="today" class="date-picker" @change="onPickDate">
+        <view class="sticker left press-bounce">📅 选日期</view>
+      </picker>
       <view class="title">穿搭日记📒</view>
       <view class="sticker press-bounce" @click="fetchLogs(true)">✦ 刷新</view>
+    </view>
+
+    <view v-if="filterDate" class="filter-bar">
+      <view class="filter-chip press-bounce" @click="clearFilter">只看 {{ shortDate(filterDate) }} ✕</view>
     </view>
 
     <view v-if="booting" class="empty"><view class="empty-d">加载中…</view></view>
     <view v-else-if="logs.length" class="album">
       <template v-for="row in grouped" :key="row.key">
-        <view v-if="row.kind === 'date'" class="date-tab">
+        <view v-if="row.kind === 'month'" class="month-head">
+          <text class="month-label">{{ row.label }}</text>
+          <view class="month-line" />
+        </view>
+        <view v-else-if="row.kind === 'date'" class="date-tab">
           <view class="clip">📎</view>
           <text>{{ row.label }}</text>
         </view>
@@ -196,6 +258,15 @@ const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.it
       <view class="empty-d">点下面让桃桃再试一次</view>
       <button class="btn-primary" style="margin-top:24rpx;width:280rpx" @click="fetchLogs(true)">重试</button>
     </view>
+    <view v-else-if="filterDate" class="empty">
+      <TaotaoSprite mood="book" :size="160" />
+      <view class="empty-t">{{ shortDate(filterDate) }} 没有穿搭记录</view>
+      <view class="empty-d">换个日期看看，或者现在补记一套</view>
+      <view class="empty-actions">
+        <view class="empty-btn ghost press-bounce" @click="clearFilter">看全部</view>
+        <view class="empty-btn press-bounce" @click="goRecord">去记录</view>
+      </view>
+    </view>
     <view v-else class="empty">
       <TaotaoSprite mood="book" :size="180" />
       <view class="empty-t">快来写下你的第一套穿搭日记吧！</view>
@@ -236,6 +307,72 @@ const coverOf = (log) => (log.photo_url) || (log.items && log.items[0] && log.it
   margin-bottom: 16rpx;
 }
 .title { font-size: 40rpx; font-weight: 800; }
+.date-picker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+}
+.sticker.left {
+  position: static;
+  transform: rotate(-6deg);
+  background: #e7f3ff;
+  border-color: #93c5fd;
+}
+.filter-bar {
+  display: flex;
+  justify-content: center;
+  margin: 4rpx 0 12rpx;
+}
+.filter-chip {
+  padding: 8rpx 24rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
+}
+.month-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  margin: 28rpx 0 4rpx;
+}
+.month-head:first-child {
+  margin-top: 4rpx;
+}
+.month-label {
+  flex-shrink: 0;
+  font-size: 32rpx;
+  font-weight: 800;
+  color: #382e36;
+  margin-right: 16rpx;
+}
+.month-line {
+  flex: 1;
+  height: 0;
+  border-top: 3rpx dashed #f3b8c8;
+}
+.empty-actions {
+  display: flex;
+  gap: 20rpx;
+  margin-top: 28rpx;
+}
+.empty-btn {
+  padding: 0 40rpx;
+  height: 76rpx;
+  line-height: 76rpx;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
+}
+.empty-btn.ghost {
+  color: #ff8fb1;
+  background: #fff8f5;
+  border: 2rpx dashed #ffb3c9;
+}
 .sticker {
   position: absolute;
   right: 0;

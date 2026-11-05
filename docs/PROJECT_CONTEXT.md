@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）；时间轴详情页，日记记录当天温度与天气。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）；时间轴详情页，日记记录当天温度与天气；时间轴按月分段与按日期筛选。
 
 ---
 
@@ -164,7 +164,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | 方法 | 路径 | 请求字段 | 响应 `data` |
 |------|------|----------|-------------|
 | POST | `/api/wear-logs` | `item_ids`（去重后 1~12 件）与 `outfit_id` 二选一，优先 `item_ids`；可选 `wear_date`（YYYY-MM-DD，缺省今天）、`mood`、`content`（≤100 字）、`photo_url`、`temperature`、`weather`（≤20）、`collage`（见下）、`increase_wear_count`（默认 false） | `WearLog.to_dict()` |
-| GET | `/api/wear-logs` | Query：`page`、`per_page` | `{ total, page, per_page, list }` |
+| GET | `/api/wear-logs` | Query：`page`、`per_page`；`date`（选填，YYYY-MM-DD，只返回这一天，格式错误 4002） | `{ total, page, per_page, list }`，按 `wear_date` 倒序、同日按创建倒序 |
 | GET | `/api/wear-logs/<log_id>` | — | `WearLog.to_dict()` |
 | PUT | `/api/wear-logs/<log_id>` | 仅 `mood`、`content` | `WearLog.to_dict()` |
 | DELETE | `/api/wear-logs/<log_id>` | — | 软删除 |
@@ -354,7 +354,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | item/add | `POST /api/upload` → `POST /api/ai/cutout` → `POST /api/ai/recognize-item`；`GET/POST/PUT/DELETE /api/items` | 新增时上传后自动抠图（可用回原图或重新抠），抠完自动识别并回填合法选项；AI 调用均 silent，失败不打断手动填写 |
 | outfit/canvas | `GET /api/items`；`GET /api/outfits/:id`（编辑时）；`POST /api/outfits`（保存）；`PUT /api/outfits/:id`（更新这套） | 拖动、缩放衣物生成 `collage`；「♡ 保存」存为搭配（名字选填）；编辑已有搭配时可选「更新这套 / 另存为新搭配」；「用这套去打卡」写入 outfit store 跳 `diary/create`；推荐进入时可「换一套」 |
 | diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`temperature`、`weather`、`increase_wear_count: true`） | 温度、天气取首页 30 分钟内的天气缓存 `sw_weather`，没有则为 null（手动调的温度不记录）；成功后清空 store，`switchTab` 时间轴 |
-| timeline | `GET /api/wear-logs` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；点卡片进 `timeline/detail?log_id=`；卡片上「💬」直接进 `diary/edit`；「⭐」只存在页面内存，刷新即丢失；`onShow` 时刷新列表 |
+| timeline | `GET /api/wear-logs`（筛选时带 `date`） | 按「月份分段标题 → 日（N日 周X，今天/昨天）→ 小卡」三层展示，最新在前；标题左侧「📅 选日期」（`picker mode="date"`，最晚今天）筛选某一天，显示「只看 M月D日 ✕」标签，点 ✕ 恢复；筛选无结果时显示「看全部 / 去记录」；切换筛选只采用最后一次请求结果；有 `collage` 时用 `OutfitCollage` 还原拼贴；点卡片进 `timeline/detail?log_id=`；卡片上「💬」直接进 `diary/edit`；「⭐」只存在页面内存，刷新即丢失；`onShow` 时刷新列表 |
 | timeline/detail | `GET /api/wear-logs/:id`；逐件静默 `GET /api/items/:id`（检查是否已删除）；`DELETE /api/wear-logs/:id` | 展示日期、天气温度、拼贴图（无则缩略图）、心情、一句话、现场照（可预览）、衣物清单（在衣橱的可点进编辑，已删的标注）；底部「删除这条记录 / 编辑心情和日记」；从编辑页返回时重新加载 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
 | mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存 |
@@ -467,4 +467,4 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 116 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 125 项通过）
