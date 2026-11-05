@@ -3,9 +3,15 @@
 认证业务逻辑层
 只处理业务规则，不处理 HTTP 请求/响应
 """
+import json
 import re
+import secrets
+import urllib.error
+import urllib.parse
+import urllib.request
 from typing import Tuple
 
+from flask import current_app
 from flask_jwt_extended import create_access_token
 
 from app.common.errors import ApiError
@@ -14,6 +20,13 @@ from app.models.user import User
 
 # 邮箱正则（RFC 5322 简化版）
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+
+# 微信 code 换 openid 接口
+WX_CODE2SESSION_URL = 'https://api.weixin.qq.com/sns/jscode2session'
+WX_REQUEST_TIMEOUT_SECONDS = 5
+# 微信 code 无效 / 已使用 / 过期等，属于前端需要重新 wx.login 的情况
+WX_INVALID_CODE_ERRCODES = {40029, 40163}
+WX_DEFAULT_NICKNAME = '衣橱主人'
 
 
 class AuthService:
@@ -68,6 +81,91 @@ class AuthService:
         # 生成 JWT（identity 为 user.id）
         access_token = create_access_token(identity=str(user.id))
         return user, access_token
+
+    # ---------------- 微信一键登录 ----------------
+    @staticmethod
+    def wx_login(code: str) -> Tuple[User, str, bool]:
+        """
+        小程序 wx.login 拿到的 code → openid → 查找或创建用户
+        :return: (用户对象, JWT access_token, 是否新建用户)
+        :raises ApiError: 1004 参数错误 / 1006 未配置 / 1007 code 无效 / 1008 微信服务不可用
+        """
+        code = (code or '').strip() if isinstance(code, str) else ''
+        if not code:
+            raise ApiError('缺少微信登录 code', code=1004)
+
+        openid = AuthService._code_to_openid(code)
+
+        # openid 唯一索引包含已软删除的账号：旧账号已删除时先释放 openid，再按新用户创建
+        user = User.query.filter_by(openid=openid).first()
+        if user and user.deleted_at is not None:
+            user.openid = None
+            db.session.flush()
+            user = None
+
+        is_new = user is None
+        if is_new:
+            user = User(username=AuthService._generate_wx_username(), openid=openid,
+                        nickname=WX_DEFAULT_NICKNAME)
+            db.session.add(user)
+        db.session.commit()
+
+        access_token = create_access_token(identity=str(user.id))
+        return user, access_token, is_new
+
+    @staticmethod
+    def _code_to_openid(code: str) -> str:
+        """调用微信 jscode2session。AppSecret 只放在请求里，绝不写进日志"""
+        appid = (current_app.config.get('WX_APPID') or '').strip()
+        secret = (current_app.config.get('WX_APPSECRET') or '').strip()
+        if not appid or not secret:
+            raise ApiError('微信登录未配置', code=1006)
+
+        query = urllib.parse.urlencode({
+            'appid': appid,
+            'secret': secret,
+            'js_code': code,
+            'grant_type': 'authorization_code',
+        })
+        data = AuthService._fetch_wx_json(f'{WX_CODE2SESSION_URL}?{query}')
+
+        errcode = data.get('errcode') or 0
+        if errcode in WX_INVALID_CODE_ERRCODES:
+            raise ApiError('微信登录凭证已失效，请重试', code=1007)
+        if errcode:
+            current_app.logger.warning('jscode2session 返回错误 errcode=%s', errcode)
+            raise ApiError('微信登录失败，请稍后再试', code=1008)
+
+        openid = data.get('openid')
+        if not isinstance(openid, str) or not openid:
+            raise ApiError('微信登录失败，请稍后再试', code=1008)
+        return openid
+
+    @staticmethod
+    def _fetch_wx_json(url: str) -> dict:
+        """GET 微信接口并解析 JSON；异常日志里不带 URL（URL 含 AppSecret）"""
+        try:
+            with urllib.request.urlopen(url, timeout=WX_REQUEST_TIMEOUT_SECONDS) as resp:
+                raw = resp.read()
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            current_app.logger.warning('jscode2session 请求失败：%s', type(e).__name__)
+            raise ApiError('微信服务暂时不可用，请稍后再试', code=1008)
+        try:
+            data = json.loads(raw.decode('utf-8'))
+        except ValueError:
+            raise ApiError('微信服务返回格式异常', code=1008)
+        if not isinstance(data, dict):
+            raise ApiError('微信服务返回格式异常', code=1008)
+        return data
+
+    @staticmethod
+    def _generate_wx_username() -> str:
+        """微信账号的内部用户名：wx_ + 10 位随机串，撞名就重试"""
+        for _ in range(5):
+            candidate = f'wx_{secrets.token_hex(5)}'
+            if not User.query.filter_by(username=candidate).first():
+                return candidate
+        raise ApiError('创建账号失败，请重试', code=1008)
 
     # ---------------- 获取当前用户 ----------------
     @staticmethod

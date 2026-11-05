@@ -16,6 +16,7 @@ class User(db.Model):
     __table_args__ = (
         db.UniqueConstraint('username', name='uk_username'),
         db.UniqueConstraint('email', name='uk_email'),
+        db.UniqueConstraint('openid', name='uk_openid'),
         db.Index('idx_deleted_at', 'deleted_at'),
         {'comment': '用户表'},
     )
@@ -23,7 +24,8 @@ class User(db.Model):
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=True, comment='主键ID')
     username = db.Column(db.String(50), nullable=False, comment='登录用户名')
     email = db.Column(db.String(100), nullable=True, comment='邮箱地址（选填）')
-    password_hash = db.Column(db.String(255), nullable=False, comment='密码哈希（如 bcrypt）')
+    password_hash = db.Column(db.String(255), nullable=True, comment='密码哈希；微信登录创建的账号为 NULL')
+    openid = db.Column(db.String(64), nullable=True, comment='微信小程序 openid；账号密码注册的用户为 NULL')
     nickname = db.Column(db.String(50), nullable=True, comment='用户昵称')
     avatar = db.Column(db.String(500), nullable=True, comment='头像图片URL')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
@@ -38,7 +40,9 @@ class User(db.Model):
         self.password_hash = generate_password_hash(raw_password)
 
     def check_password(self, raw_password: str) -> bool:
-        """验证明文密码是否匹配"""
+        """验证明文密码是否匹配；没有设置密码（微信账号）一律不通过"""
+        if not self.password_hash:
+            return False
         return check_password_hash(self.password_hash, raw_password)
 
     # ---------- 序列化 ----------

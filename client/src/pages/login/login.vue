@@ -7,6 +7,31 @@ const userStore = useUserStore()
 const account = ref('')
 const password = ref('')
 const loading = ref(false)
+// 小程序端默认只显示「微信一键登录」，点「使用账号密码登录」再展开表单；H5 只有账号密码
+const showPasswordForm = ref(true)
+// #ifdef MP-WEIXIN
+showPasswordForm.value = false
+// #endif
+
+function goHome() {
+  uni.showToast({ title: '登录成功', icon: 'success' })
+  setTimeout(() => {
+    uni.switchTab({ url: '/pages/index/index' })
+  }, 400)
+}
+
+async function handleWxLogin() {
+  if (loading.value) return
+  loading.value = true
+  try {
+    await userStore.wxLogin()
+    goHome()
+  } catch (e) {
+    uni.showToast({ title: (e && e.msg) || '微信登录失败，请稍后再试', icon: 'none' })
+  } finally {
+    loading.value = false
+  }
+}
 
 async function handleLogin() {
   if (!account.value.trim() || !password.value) {
@@ -16,10 +41,7 @@ async function handleLogin() {
   loading.value = true
   try {
     await userStore.login(account.value.trim(), password.value)
-    uni.showToast({ title: '登录成功', icon: 'success' })
-    setTimeout(() => {
-      uni.switchTab({ url: '/pages/index/index' })
-    }, 400)
+    goHome()
   } catch (e) {
     // 错误提示已由 request 统一处理
   } finally {
@@ -40,7 +62,18 @@ function goRegister() {
       <view class="subtitle">管理你的衣物，记录每天的穿搭</view>
     </view>
 
+    <!-- #ifdef MP-WEIXIN -->
     <view class="card">
+      <button class="btn-primary" :disabled="loading" @click="handleWxLogin">
+        {{ loading ? '登录中...' : '微信一键登录' }}
+      </button>
+      <view v-if="!showPasswordForm" class="footer">
+        <text class="link" @click="showPasswordForm = true">使用账号密码登录</text>
+      </view>
+    </view>
+    <!-- #endif -->
+
+    <view v-if="showPasswordForm" class="card">
       <view class="label">用户名 / 邮箱</view>
       <input class="input" v-model="account" placeholder="请输入用户名或邮箱" placeholder-class="ph" />
 
@@ -85,6 +118,9 @@ function goRegister() {
   margin-top: 12rpx;
   font-size: 26rpx;
   color: #7b8794;
+}
+.card + .card {
+  margin-top: 32rpx;
 }
 .mt {
   margin-top: 24rpx;

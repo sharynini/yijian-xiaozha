@@ -52,6 +52,10 @@ class Config:
     QWEATHER_API_KEY = os.getenv('QWEATHER_API_KEY', '')
     QWEATHER_API_HOST = os.getenv('QWEATHER_API_HOST', '')
 
+    # 微信小程序（公众平台 → 开发管理 → 开发设置）；未配置时 /api/auth/wx-login 返回 1006
+    WX_APPID = os.getenv('WX_APPID', '')
+    WX_APPSECRET = os.getenv('WX_APPSECRET', '')
+
     # 阿里云百炼（通义千问视觉模型）；未配置时添加衣物页只能手动选择
     DASHSCOPE_API_KEY = os.getenv('DASHSCOPE_API_KEY', '')
     DASHSCOPE_BASE_URL = os.getenv('DASHSCOPE_BASE_URL') or 'https://dashscope.aliyuncs.com/compatible-mode/v1'

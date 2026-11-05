@@ -1,12 +1,27 @@
 <script>
-import { TOKEN_KEY } from '@/utils/config'
+import { TOKEN_KEY, AUTH_EVENT } from '@/utils/config'
+import { wxSilentLogin } from '@/utils/request'
+import { useUserStore } from '@/store/user'
 
 export default {
   onLaunch() {
+    // 静默登录成功（启动时或 401 重登）后同步到 Pinia，「我的」等页面直接拿到最新用户
+    uni.$on(AUTH_EVENT, (data) => {
+      useUserStore().setAuth(data.access_token, data.user)
+    })
+
     const token = uni.getStorageSync(TOKEN_KEY)
-    if (!token) {
-      uni.reLaunch({ url: '/pages/login/login' })
-    }
+    if (token) return
+
+    // #ifdef MP-WEIXIN
+    // 小程序：不强制跳登录页，后台静默 wx.login 换 token，首页照常展示。
+    // 失败（未配置、网络问题、用户主动退出过）时，页面发请求遇到 401 会再试一次，仍失败才进登录页
+    wxSilentLogin().catch(() => {})
+    // #endif
+
+    // #ifndef MP-WEIXIN
+    uni.reLaunch({ url: '/pages/login/login' })
+    // #endif
   },
   onShow() {},
   onHide() {}

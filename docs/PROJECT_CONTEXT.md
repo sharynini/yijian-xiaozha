@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
-> 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`）。不确定处标注「待确认」。  
-> 生成日期：2026-10-23。只读整理，未改业务代码。
+> 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`）。
 
 ---
 
@@ -12,52 +12,53 @@
 | 层级 | 技术 |
 |------|------|
 | 前端 | uni-app（Vue 3 + `<script setup>`）+ Pinia + Vite；目标端 H5 / 微信小程序（`package.json` scripts） |
-| 后端 | Python Flask 3.0.3 + Flask-SQLAlchemy + Flask-JWT-Extended + Flask-CORS |
-| 数据库 | MySQL（`schema.sql` 标注 5.7+ / utf8mb4 / InnoDB）；驱动 PyMySQL |
-| 鉴权 | JWT Bearer（`Authorization: Bearer <token>`），默认过期 7 天 |
+| 后端 | Python Flask 3.0.3 + Flask-SQLAlchemy + Flask-JWT-Extended + Flask-CORS + Flask-Migrate |
+| 数据库 | MySQL（utf8mb4 / InnoDB）；驱动 PyMySQL；表结构变更走 Alembic 迁移（`server/migrations/`） |
+| 鉴权 | JWT Bearer（`Authorization: Bearer <token>`），默认过期 7 天（`JWT_ACCESS_TOKEN_EXPIRES`） |
+| 外部服务 | 和风天气（实时天气）、阿里云百炼 · 通义千问视觉模型（衣物识别）；均用标准库 `urllib` 调用 |
+| 本地 AI | rembg（`isnet-general-use` 模型，CPU）抠图去背景，模型首次使用时下载到 `~/.rembg/models/` |
+| 测试 | pytest（`server/tests/`，内存 SQLite，不连业务库） |
 | 统一响应 | `{ code, msg, data }`；业务成功 `code === 0`，HTTP 多为 200 |
 
 开发端口：
 
-- 后端：`server/run.py` → `0.0.0.0:5001`
+- 后端：`server/run.py` → `0.0.0.0:5001`（Flask 自带开发服务器）
 - 前端 H5：`client/vite.config.js` → `8081`
 
 ### 1.2 仓库目录结构（实际存在）
 
 ```
 secret/
-├── schema.sql                 # 建库建表脚本
-├── MVP规划文档.md             # 产品规划（与实现可能有偏差）
-├── docs/
-│   └── PROJECT_CONTEXT.md     # 本文件
-├── client/                    # uni-app 前端
-│   ├── package.json
-│   ├── vite.config.js
-│   ├── index.html
+├── CLAUDE.md / .cursor/rules/   # AI 协作规则
+├── schema.sql                   # 初始建表脚本（已落后于迁移，见 5.x）
+├── MVP规划文档.md               # 产品规划（与实现有偏差，见第 6 节）
+├── docs/PROJECT_CONTEXT.md      # 本文件
+├── client/                      # uni-app 前端
+│   ├── .env.development / .env.production   # 仅 VITE_API_BASE（后端地址），无密钥
 │   └── src/
-│       ├── main.js
-│       ├── App.vue
-│       ├── pages.json         # 页面路由 + tabBar
-│       ├── manifest.json
-│       ├── uni.scss
-│       ├── pages/             # 业务页面
-│       ├── components/        # AppLoading、AppEmpty
-│       ├── store/             # user.js、outfit.js
-│       ├── utils/             # config / request / constants
-│       └── composables/       # useRequest.js
-└── server/                    # Flask 后端
-    ├── requirements.txt
-    ├── config.py
-    ├── run.py
+│       ├── App.vue / main.js / manifest.json / pages.json / uni.scss
+│       ├── pages/               # 业务页面（见 4.1）
+│       ├── components/          # AppTabBar、AppLoading、AppEmpty、OutfitCollage、SafeImage、TaotaoSprite
+│       ├── custom-tab-bar/      # 小程序自定义 tabBar 容器
+│       ├── static/              # tabbar 图标、taotao 插画
+│       ├── store/               # user.js、outfit.js
+│       ├── utils/               # config / request / constants
+│       └── composables/         # useRequest.js
+└── server/                      # Flask 后端
+    ├── .env.example             # 环境变量模板（无值）；真实值在 server/.env（已 gitignore）
+    ├── requirements.txt / config.py / run.py / pytest.ini
+    ├── migrations/              # Flask-Migrate / Alembic
+    ├── scripts/                 # cleanup_orphan_outfits.py、migrate_image_urls.py（一次性运维脚本）
+    ├── sql/                     # 历史手工 SQL
+    ├── tests/                   # pytest
+    ├── uploads/                 # 运行时上传目录（仅 .gitkeep 入库）
     └── app/
-        ├── __init__.py        # 应用工厂、蓝图注册
-        ├── extensions.py
-        ├── common/            # response、errors
-        ├── models/            # user / item / outfit / wear_log
-        └── modules/           # auth / item / outfit / wear_log / recommend / upload / test / home
+        ├── __init__.py          # 应用工厂、蓝图注册
+        ├── extensions.py        # db / jwt / cors / migrate
+        ├── common/              # response、errors、media（图片地址工具）
+        ├── models/              # user / item / outfit(+outfit_item) / wear_log
+        └── modules/             # auth / item / outfit / wear_log / recommend / weather / ai / upload / test / home
 ```
-
-说明：`server/uploads/` 为运行时上传目录（配置在 `config.py`），不在静态源码树中强制存在。
 
 ---
 
@@ -65,113 +66,179 @@ secret/
 
 注册位置：`server/app/__init__.py`。  
 统一成功结构：`{ "code": 0, "msg": "...", "data": ... }`。  
-JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer <token>`。
+JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer <token>`。  
+用户隔离：所有业务查询均按 JWT 中的 `user_id` 过滤。
 
-### 2.1 测试（前缀 `/api/v1/test`，无需 JWT）
+### 2.0 业务错误码（按模块，来自各 `services.py`）
 
-| 方法 | 路径 | JWT | 请求 | 响应 `data` |
-|------|------|-----|------|-------------|
-| GET | `/api/v1/test/ping` | 否 | 无 | `{ "message": "pong" }` |
-| GET | `/api/v1/test/db` | 否 | 无 | 成功 `{ "database": "connected" }`；失败业务码 500 |
+| 区段 | 模块 | 已用码 |
+|------|------|--------|
+| 1xxx | 认证 | 1001 用户名已存在；1002 邮箱已注册；1003 用户名或密码错误；1004 参数错误；1005 用户不存在或已删除；1006 微信登录未配置；1007 微信 code 无效或已使用；1008 微信服务异常 |
+| 2xxx | 衣物 | 2001 不存在；2002 参数不合法 |
+| 3xxx | 搭配 | 3001 搭配不存在 / 含无效衣物；3002 item_ids 参数错误 |
+| 4xxx | 穿搭日记 | 4001 不存在；4002 参数错误；4003 衣物不属于当前用户；4004 衣物已删除；4005 collage 结构错误 |
+| 5xxx | 推荐 | 5002 temperature 缺失 / 非数字 / 超范围 |
+| 6xxx | 上传 | 6001 未选文件 / 格式不支持 |
+| 7xxx | 天气 | 7001 未配置；7002 经纬度错误；7003 天气服务不可用 |
+| 8xxx | AI | 8001 识别未配置；8002 图片无效（非本人/非本站/不存在）；8003 识别失败；8004 太频繁；8005 抠图组件未安装；8006 没抠出衣物；8007 抠图失败 |
+
+### 2.1 测试与调试台（仅 DEBUG 模式注册，生产不暴露）
+
+| 方法 | 路径 | JWT | 说明 |
+|------|------|-----|------|
+| GET | `/api/v1/test/ping` | 否 | `{ "message": "pong" }` |
+| GET | `/api/v1/test/db` | 否 | 数据库连通性 |
+| GET | `/` | 否 | 内嵌 HTML 接口调试台（`home/routes.py`） |
 
 ### 2.2 认证（前缀 `/api/auth`）
 
 | 方法 | 路径 | JWT | 请求字段 | 响应 `data` |
 |------|------|-----|----------|-------------|
-| POST | `/api/auth/register` | 否 | Body JSON：`username`、`email`、`password`（服务端均必填；用户名 2–20；密码 ≥6；邮箱正则校验） | `User.to_dict()`：`user_id`、`username`、`email`、`nickname`、`avatar`、`created_at` |
-| POST | `/api/auth/login` | 否 | Body：`account`（用户名或邮箱）、`password` | `{ "access_token", "user": User.to_dict() }` |
+| POST | `/api/auth/register` | 否 | Body：`username`、`email`、`password`（均必填；用户名 2–20；密码 ≥6；邮箱正则） | `User.to_dict()`：`user_id`、`username`、`email`、`nickname`、`avatar`、`created_at` |
+| POST | `/api/auth/login` | 否 | Body：`account`（用户名或邮箱）、`password` | `{ "access_token", "user" }` |
+| POST | `/api/auth/wx-login` | 否 | Body：`code`（小程序 `wx.login` 返回） | `{ "access_token", "user", "is_new" }` |
 | GET | `/api/auth/profile` | 是 | 无 | `User.to_dict()` |
+
+微信一键登录（`auth/services.py`）：
+
+- 后端用 `WX_APPID` + `WX_APPSECRET` 调微信 `jscode2session` 换 openid（标准库 `urllib`，超时 5 秒），不保存 `session_key`，日志里不带含 AppSecret 的 URL
+- openid 已存在 → 直接登录；不存在 → 自动建号：`username = wx_<10 位随机>`、`nickname = 衣橱主人`、`password_hash = NULL`
+- openid 对应的账号已软删除时，先把旧账号的 openid 置空，再建新账号
+- 微信账号没有密码，不能走账号密码登录（`check_password` 对空哈希恒为 False）；暂不支持把已有账号密码用户与微信绑定
+- `User.to_dict()` 不返回 openid
+
+无注销账号、修改资料/密码、绑定微信接口。
 
 ### 2.3 衣物（前缀 `/api/items`，均需 JWT）
 
-| 方法 | 路径 | JWT | 请求字段 | 响应 `data` |
-|------|------|-----|----------|-------------|
-| POST | `/api/items` | 是 | Body：必填 `image_url`、`type`；可选 `color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`。`type` ∈ {上装,下装,外套,鞋子,配饰}；`season` ∈ {春,夏,秋,冬,全季}；`occasion` ∈ {日常,工作,运动,正式}；`status` ∈ {正常,洗衣中,收纳中} | `Item.to_dict()` |
-| GET | `/api/items` | 是 | Query：`type`、`color`、`season`（可选，等值 AND）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list: Item.to_dict[] }` |
-| GET | `/api/items/<item_id>` | 是 | 路径参数 `item_id` | `Item.to_dict()` |
-| PUT | `/api/items/<item_id>` | 是 | Body：部分更新，字段同创建白名单 | `Item.to_dict()` |
-| DELETE | `/api/items/<item_id>` | 是 | 无 | `data` 可为 null；`msg`「删除成功」（软删除） |
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| POST | `/api/items` | 必填 `image_url`、`type`；可选 `color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark` | `Item.to_dict()` |
+| GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list }` |
+| GET | `/api/items/<item_id>` | — | `Item.to_dict()` |
+| PUT | `/api/items/<item_id>` | 部分更新，字段同创建白名单 | `Item.to_dict()` |
+| DELETE | `/api/items/<item_id>` | — | 软删除 |
+
+枚举（`item/services.py`，前端 `utils/constants.js` 对齐）：
+
+- `type` ∈ {上装, 下装, 连衣裙, 外套, 鞋子, 包包, 帽子, 配饰}
+- `season` ∈ {春, 夏, 秋, 冬, 全季}
+- `occasion` ∈ {日常, 工作, 运动, 正式}
+- `status` ∈ {正常, 洗衣中, 收纳中}
+- `color`：前端与 AI 使用 15 个固定选项（黑色、白色、灰色、米色、卡其、棕色、蓝色、牛仔蓝、绿色、红色、粉色、紫色、黄色、橙色、花色）；后端不校验颜色取值，按纯文本存储（空串存 NULL）
+
+`image_url` 写库前经 `to_storage_path` 转为相对路径 `/uploads/xxx`，返回时经 `to_public_url` 拼完整地址（见 2.9）。
 
 `Item.to_dict()` 字段：`item_id`、`user_id`、`image_url`、`type`、`color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`、`wear_count`、`created_at`、`updated_at`。
 
 ### 2.4 搭配（前缀 `/api/outfits`，均需 JWT）
 
-| 方法 | 路径 | JWT | 请求字段 | 响应 `data` |
-|------|------|-----|----------|-------------|
-| POST | `/api/outfits` | 是 | Body：`item_ids`（非空整数数组，必填）；`name`（可选，空串/空 → 存 `null`） | 搭配详情：`outfit_id`、`user_id`、`name`、`created_at`、`items`（`Item.to_dict[]`）、`item_count` |
-| GET | `/api/outfits/<outfit_id>` | 是 | 路径参数 | 同上详情结构 |
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| POST | `/api/outfits` | `item_ids`（非空整数数组）；`name`（可选） | `outfit_id`、`user_id`、`name`、`created_at`、`items`、`item_count` |
+| GET | `/api/outfits/<outfit_id>` | — | 同上 |
 
-说明：无列表、更新、删除 outfit 接口（以当前 `routes.py` 为准）。
+无列表、更新、删除接口；前端目前没有任何页面调用 outfits 接口。
 
 ### 2.5 穿搭日记（前缀 `/api/wear-logs`，均需 JWT）
 
-| 方法 | 路径 | JWT | 请求字段 | 响应 `data` |
-|------|------|-----|----------|-------------|
-| POST | `/api/wear-logs` | 是 | Body：`item_ids`（整数数组，去重后 1~12 件）与 `outfit_id` 二选一，**优先 `item_ids`**（此时 `outfit_id` 存 NULL）；仅传 `outfit_id` 时沿用旧逻辑。可选 `wear_date`（YYYY-MM-DD，缺省今天）、`mood`、`content`（≤500）、`photo_url`、`temperature`、`weather`（≤20）、`increase_wear_count`（默认 false） | `WearLog.to_dict()` |
-| GET | `/api/wear-logs` | 是 | Query：`page`、`per_page` | `{ total, page, per_page, list: WearLog.to_dict[] }` |
-| GET | `/api/wear-logs/<log_id>` | 是 | 路径参数 | `WearLog.to_dict()` |
-| PUT | `/api/wear-logs/<log_id>` | 是 | Body：仅 `mood`、`content`（出现的字段才更新） | `WearLog.to_dict()` |
-| DELETE | `/api/wear-logs/<log_id>` | 是 | 无 | 软删除成功 |
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| POST | `/api/wear-logs` | `item_ids`（去重后 1~12 件）与 `outfit_id` 二选一，优先 `item_ids`；可选 `wear_date`（YYYY-MM-DD，缺省今天）、`mood`、`content`（≤100 字）、`photo_url`、`temperature`、`weather`（≤20）、`collage`（见下）、`increase_wear_count`（默认 false） | `WearLog.to_dict()` |
+| GET | `/api/wear-logs` | Query：`page`、`per_page` | `{ total, page, per_page, list }` |
+| GET | `/api/wear-logs/<log_id>` | — | `WearLog.to_dict()` |
+| PUT | `/api/wear-logs/<log_id>` | 仅 `mood`、`content` | `WearLog.to_dict()` |
+| DELETE | `/api/wear-logs/<log_id>` | — | 软删除 |
 
-`WearLog.to_dict()`：`log_id`、`user_id`、`outfit_id`、`wear_date`、`mood`、`content`、`photo_url`、`temperature`、`weather`、`items`（来自 `items_snapshot`）、`created_at`、`updated_at`。
+`collage`（手动搭配画布布局，选填）：数组，最多 12 项，每项 `{ item_id, x, y, w, z }`。`item_id` 必须在本次 `item_ids` 内；`x`/`y` 为左上角相对画布边长 0~1，`w` 为宽度比例 0.05~1，`z` 层级 0~99；越界值会被夹到合法范围，结构错误返回 4005。
 
-`mood` 枚举（`wear_log.py`）：开心 / 平静 / 专注 / 疲惫 / 期待 / 低落 / 自信 / 随性。
+`WearLog.to_dict()`：`log_id`、`user_id`、`outfit_id`、`wear_date`、`mood`、`content`、`photo_url`、`temperature`、`weather`、`items`（来自 `items_snapshot`，图片转完整地址）、`collage`、`created_at`、`updated_at`。
 
-创建时按 `item_ids`（或旧路径下搭配内衣物）生成 `items_snapshot`（每项含 `item_id`、`image_url`、`type`、`color`、`season`），与写 `wear_log`、可选 `wear_count += 1` 同一事务。`item_ids` 须全部属于当前用户且未删除；空数组 `code=4002`，他人衣物 `code=4003`，已删除衣物 `code=4004`。
+`mood` 枚举：开心 / 平静 / 专注 / 疲惫 / 期待 / 低落 / 自信 / 随性。
+
+创建时生成 `items_snapshot`（每项含 `item_id`、`image_url`、`type`、`color`、`season`），与写 `wear_log`、可选 `wear_count += 1` 同一事务。
 
 ### 2.6 今日推荐（前缀 `/api/recommend`，需 JWT）
 
-| 方法 | 路径 | JWT | 请求字段 | 响应 `data` |
-|------|------|-----|----------|-------------|
-| GET | `/api/recommend` | 是 | Query：`temperature` **必填**（数字，-50~60） | `{ temperature, seasons, season_label, total_candidates, count, list: [{ items: Item.to_dict[], reason }] }`；最多 3 套 |
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| GET | `/api/recommend` | Query：`temperature` 必填（-50~60） | `{ temperature, seasons, season_label, total_candidates, count, list: [{ items, reason }] }`，最多 3 套 |
 
-规则摘要（`recommend/services.py`）：温度映射季节；仅 `status=正常` 且季节匹配或「全季」；模板为上装+下装（有外套则加一件）；按 `wear_count` 升序优先。
+规则（`recommend/services.py`）：
 
-### 2.7 上传与静态资源（`upload` 蓝图无 url_prefix）
+1. 温度映射季节：<10℃ 冬；10~25℃ 春秋；≥25℃ 夏；「全季」始终参与
+2. 仅当前用户、未删除、`status=正常` 的衣物
+3. 基础单元为「上装+下装」或「连衣裙」单穿，两类交替取用；有外套则轮流附加一件
+4. 单品按 `wear_count` 升序（累计穿着次数少的优先）；不考虑最近穿着日期、场合、鞋包配饰
 
-| 方法 | 路径 | JWT | 请求字段 | 响应 |
-|------|------|-----|----------|------|
-| POST | `/api/upload` | 是 | `multipart/form-data`，字段名固定 `file`；扩展名 jpg/jpeg/png/webp/gif | `data: { url }`（绝对 URL，基于 `request.host_url`） |
-| GET | `/uploads/<filename>` | 否 | 路径文件名 | 直接返回图片文件（非 JSON 统一结构） |
+### 2.7 天气（前缀 `/api/weather`，需 JWT）
 
-单请求体上限：`MAX_CONTENT_LENGTH = 5MB`（`config.py`）。
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| GET | `/api/weather` | Query：`lat`、`lon` | `{ temperature, text, city }` |
 
-### 2.8 首页调试台
+- 和风天气 `/v7/weather/now` + `/geo/v2/city/lookup`；Key 只在后端
+- 经纬度保留 2 位小数做进程内缓存 10 分钟
+- 未配置返回 7001，前端退回手动调温度
 
-| 方法 | 路径 | JWT | 说明 |
-|------|------|-----|------|
-| GET | `/` | 否 | 返回内嵌 HTML 接口调试台（`home/routes.py`），非业务 API |
+### 2.8 AI（前缀 `/api/ai`，均需 JWT）
 
-### 2.9 接口前缀约定（事实）
+| 方法 | 路径 | 请求字段 | 响应 `data` |
+|------|------|----------|-------------|
+| POST | `/api/ai/recognize-item` | Body：`image_url`（上传接口返回的 url 或 path） | `{ type, color, season, occasion }`，识别不出或不合法的项为 null |
+| POST | `/api/ai/cutout` | Body：`image_url` | `{ url, path }`：新生成的透明 PNG（原图文件保留） |
+
+- 两个接口都只接受本人上传到本站的图片（文件名须以 `<user_id>_` 开头，禁止目录穿越）
+- 识别：图片转 base64 发给通义千问 VL（默认模型 `qwen3-vl-plus`），后端再按枚举校验一遍；每用户每小时 30 次
+- 抠图：本地 rembg，先缩放到最长边 `CUTOUT_MAX_SIDE`（默认 1024），只保留最大主体并裁掉透明边；每用户每小时 60 次；掩码后处理默认关闭
+- 频率限制为进程内计数（多进程部署时各进程独立计数）
+
+### 2.9 上传与静态资源（`upload` 蓝图无 url_prefix）
+
+| 方法 | 路径 | JWT | 请求 | 响应 |
+|------|------|-----|------|------|
+| POST | `/api/upload` | 是 | `multipart/form-data`，字段 `file`；扩展名 jpg/jpeg/png/webp/gif | `data: { url, path }` |
+| GET | `/uploads/<filename>` | 否 | — | 直接返回图片文件 |
+
+- 文件名 `<user_id>_<uuid>.<ext>`；单请求上限 5MB（`MAX_CONTENT_LENGTH`）
+- 只按扩展名判断格式，不校验文件内容
+- 图片地址约定（`common/media.py`）：库里只存相对路径 `/uploads/xxx`；返回时优先用 `PUBLIC_BASE_URL` 拼接，未配置则用当前请求域名
+
+### 2.10 接口前缀约定
 
 | 模块 | 前缀 |
 |------|------|
-| test | `/api/v1/test` |
+| test（仅 DEBUG） | `/api/v1/test` |
 | 其余业务 | `/api/...`（无 `v1`） |
 | 静态图 | `/uploads/...` |
-
-详见第 5 节「已知问题」。
 
 ---
 
 ## 3. 数据库表与字段
 
-依据：`schema.sql` + `server/app/models/*`。表名均为**单数**。
+依据：`server/app/models/*` + `server/migrations/versions/*`。表名均为单数。
+
+### 3.0 迁移
+
+- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid`
+- 已有库升级：`cd server && flask db upgrade`（需已加载 `server/.env`；具体 `FLASK_APP` 设置：待确认）
+- 新建库：执行 `schema.sql`（已与最新迁移同步），再执行 `flask db stamp head`
+- 改模型后：`flask db migrate -m "说明"` 生成脚本，检查后 `flask db upgrade`
 
 ### 3.1 `user`
 
-| 字段 | 类型（schema） | 说明 |
-|------|----------------|------|
-| id | BIGINT UNSIGNED PK AI | 主键 |
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT UNSIGNED PK AI | 对外 `user_id` |
 | username | VARCHAR(50) UNIQUE NOT NULL | 登录名 |
-| email | VARCHAR(100) UNIQUE NULL | schema 可空；**注册接口强制必填** |
-| password_hash | VARCHAR(255) NOT NULL | werkzeug 哈希 |
+| email | VARCHAR(100) UNIQUE NULL | 库里可空；注册接口强制必填 |
+| password_hash | VARCHAR(255) NULL | werkzeug 哈希；微信建的账号为 NULL |
+| openid | VARCHAR(64) UNIQUE NULL | 微信小程序 openid（不对外返回） |
 | nickname | VARCHAR(50) NULL | 注册时默认等于 username |
 | avatar | VARCHAR(500) NULL | |
-| created_at / updated_at | DATETIME | |
-| deleted_at | DATETIME NULL | 软删除 |
+| created_at / updated_at / deleted_at | DATETIME | 软删除 |
 
-模型序列化对外字段名用 `user_id`（非 `id`）。
+无 `unionid` 字段（目前只有小程序一个端，暂不需要）。
 
 ### 3.2 `item`
 
@@ -179,169 +246,198 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 |------|------|------|
 | id | BIGINT PK | 对外 `item_id` |
 | user_id | BIGINT NOT NULL FK→user | |
-| image_url | VARCHAR(500) NOT NULL | |
-| type | VARCHAR(20) NOT NULL | 上装/下装/外套/鞋子/配饰 |
+| image_url | VARCHAR(500) NOT NULL | 相对路径 `/uploads/xxx` |
+| type | VARCHAR(20) NOT NULL | 见 2.3 枚举 |
 | color / season / occasion / material / brand | 可空字符串 | |
 | price | DECIMAL(10,2) NULL | |
 | purchase_date | DATE NULL | |
 | status | VARCHAR(20) NOT NULL DEFAULT '正常' | 正常/洗衣中/收纳中 |
 | remark | TEXT NULL | |
-| wear_count | INT UNSIGNED DEFAULT 0 | |
+| wear_count | INT UNSIGNED DEFAULT 0 | 记录日记时可 +1 |
 | created_at / updated_at / deleted_at | DATETIME | 软删除 |
 
-### 3.3 `outfit`
+### 3.3 `outfit` / 3.4 `outfit_item`
 
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT PK | 对外 `outfit_id` |
-| user_id | BIGINT NOT NULL FK→user | |
-| name | VARCHAR(100) NULL | 可为 null（前端确认穿搭时传 `name: null`） |
-| created_at / updated_at / deleted_at | DATETIME | |
-
-### 3.4 `outfit_item`（搭配–衣物多对多关联表）
-
-| 字段 | 类型 | 说明 |
-|------|------|------|
-| id | BIGINT PK | 行主键 |
-| outfit_id | BIGINT NOT NULL FK→outfit ON DELETE CASCADE | |
-| item_id | BIGINT NOT NULL FK→item ON DELETE CASCADE | |
-| UNIQUE(outfit_id, item_id) | | 同一搭配内同一衣物不重复 |
-
-**如何使用（以代码为准）：**
-
-1. **写入**：`POST /api/outfits` → `OutfitService.create` 先插入 `outfit`，`flush` 得 `outfit.id`，再对每个去重后的 `item_id` 插入一行 `OutfitItem(outfit_id, item_id)`。
-2. **读取搭配详情**：`OutfitService._load_items` / `WearLogService._load_outfit_items` 通过 `Item JOIN OutfitItem`，按 `OutfitItem.id` 升序，且 `Item.deleted_at IS NULL`。
-3. **写穿搭日记**：主路径按 `item_ids` 拉当前用户未删除衣物生成 `items_snapshot`；旧请求仍可从 `outfit_item` 拉取。之后列表/详情展示主要靠快照。
-4. **无独立 REST CRUD**：没有直接增删 `outfit_item` 的接口；模型 `OutfitItem` 也无 `to_dict`。
-5. **无软删除字段**：删 outfit（若将来做）会 CASCADE 清关联行；删 item 会 CASCADE 清关联行（schema）。当前业务对 item/outfit 多为软删除，**软删 item 后关联行仍可能残留**，但查询已过滤 `Item.deleted_at`（待确认：是否需定期清理孤儿关联）。
+- `outfit`：`id`、`user_id`、`name`（可空）、`created_at`、`updated_at`、`deleted_at`
+- `outfit_item`：`id`、`outfit_id`（FK CASCADE）、`item_id`（FK CASCADE），UNIQUE(outfit_id, item_id)
+- 当前只由 `POST /api/outfits` 写入；历史上日记流程创建过的无名 outfit 可用 `server/scripts/cleanup_orphan_outfits.py` 清理
 
 ### 3.5 `wear_log`
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | id | BIGINT PK | 对外 `log_id` |
-| user_id | BIGINT NOT NULL FK→user | |
-| outfit_id | BIGINT NULL FK→outfit ON DELETE SET NULL | 主路径为 NULL；仅兼容旧请求传入有效 `outfit_id` 时填写 |
+| user_id | BIGINT NOT NULL FK→user（CASCADE） | |
+| outfit_id | BIGINT NULL FK→outfit（SET NULL） | 主路径为 NULL |
 | wear_date | DATE NOT NULL | |
 | mood | VARCHAR(10) NULL | |
-| content | VARCHAR(500) NULL | |
-| photo_url | VARCHAR(500) NULL | |
-| temperature | DECIMAL(4,1) NULL | |
-| weather | VARCHAR(20) NULL | |
-| items_snapshot | JSON NULL | 创建时写入；序列化为响应字段 `items` |
-| created_at / updated_at / deleted_at | DATETIME | |
+| content | VARCHAR(500) NULL | 业务上限 100 字（前后端一致） |
+| photo_url | VARCHAR(500) NULL | 相对路径 |
+| temperature | DECIMAL(4,1) NULL | 前端目前未传 |
+| weather | VARCHAR(20) NULL | 前端目前未传 |
+| items_snapshot | JSON NULL | 响应字段 `items` |
+| collage | JSON NULL | 画布布局，见 2.5 |
+| created_at / updated_at / deleted_at | DATETIME | 软删除 |
+
+索引：`idx_wear_date`、`idx_deleted_at`、`idx_user_date(user_id, wear_date)`、`idx_user_deleted(user_id, deleted_at)`。
 
 ### 3.6 关系简图
 
 ```
 user 1───* item
-user 1───* outfit
-user 1───* wear_log
-outfit *───* item   （经 outfit_item）
-wear_log *───? outfit（可空 FK；当前创建路径几乎总有 outfit）
+user 1───* outfit ───* outfit_item *─── item
+user 1───* wear_log ──? outfit（可空）
+wear_log.items_snapshot / collage 为 JSON，不建外键
 ```
 
 ---
 
 ## 4. 前端页面与接口调用
 
-依据：`client/src/pages.json` + 各页脚本。  
-HTTP 封装：`utils/request.js`（自动带 Token；成功 resolve `body.data`）。  
-`BASE_URL`：见第 5 节。
+HTTP 封装：`utils/request.js`。功能：自动带 Token；小程序端没有 token 时先静默微信登录、遇到 401 先静默重登并重试一次（`_withAuth`，`uploadFile` 同样适用；`auth: false` 的请求如登录注册不走这一层）；仍 401 则清登录态并跳转登录页（防重复跳转）；1 秒内相同 GET 请求去重；`silent` 选项不弹错误提示；请求成功 resolve `body.data`，失败 reject 带 `code` 的错误体。  
+`BASE_URL`：`utils/config.js` 读取 `import.meta.env.VITE_API_BASE`，来源见 7.2。
 
 ### 4.1 路由与 tabBar
 
-| path | 标题 | tabBar |
-|------|------|--------|
-| pages/index/index | 今日推荐 | 首页 |
-| pages/item/list | 我的衣橱 | 衣橱 |
-| pages/item/add | 添加衣物 | 否（编辑同页 `?id=`） |
-| pages/outfit/select | 选择今日穿搭 | 否 |
-| pages/diary/create | 轻量日记 | 否 |
-| pages/timeline/index | 穿搭时间轴 | 时间轴 |
-| pages/diary/edit | 编辑日记 | 否 |
-| pages/mine/index | 我的 | 我的 |
-| pages/login/login | 登录 | 否 |
-| pages/register/register | 注册 | 否 |
+tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `custom-tab-bar/index.vue`），4 个 tab：首页 / 衣橱 / 时间轴 / 我的。
 
-`App.vue` `onLaunch`：无本地 token 则 `reLaunch` 登录页。
+| path | 标题 | tabBar | 备注 |
+|------|------|--------|------|
+| pages/index/index | 今日推荐 | 首页 | 自定义导航栏 |
+| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏 |
+| pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=` |
+| pages/outfit/select | 选择今日穿搭 | 否 | 当前没有页面跳转到这里（入口已被画布页取代），待确认是否删除 |
+| pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 时载入推荐结果 |
+| pages/diary/create | 轻量日记 | 否 | |
+| pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
+| pages/diary/edit | 编辑日记 | 否 | |
+| pages/mine/index | 我的小窝 | 我的 | 自定义导航栏 |
+| pages/login/login | 登录 | 否 | |
+| pages/register/register | 注册 | 否 | |
 
-### 4.2 各页调用的接口
+`App.vue` 的 `onLaunch`：监听 `AUTH_EVENT`（`sw:auth-changed`）把静默登录结果同步到 Pinia；没有 token 时，小程序端后台静默 `wx.login`，不跳登录页；H5 端仍 `reLaunch` 到登录页。
 
-| 页面 | 调用的接口 | 说明 |
-|------|------------|------|
-| **login** | `POST /api/auth/login`（经 `userStore.login`） | 成功后 `switchTab` 首页 |
-| **register** | `POST /api/auth/register`（经 `userStore.register`） | 成功后返回登录页，不自动登录 |
-| **index（首页）** | `GET /api/wear-logs?page=1&per_page=1`；`GET /api/recommend?temperature=` | 用最新一条 `wear_date` 是否等于今天判断「已记录」；「用这套去记录」只写 Pinia，跳 `diary/create`，本页不调 outfits |
-| **item/list** | `GET /api/items`（筛选 + 分页）；`DELETE /api/items/:id` | 左滑软删除；点卡片进 `item/add?id=` |
-| **item/add** | `POST /api/upload`（`uploadFile`）；`GET /api/items/:id`（编辑）；`POST /api/items` 或 `PUT /api/items/:id` | 先上传再提交 `image_url` |
-| **outfit/select** | `GET /api/items?page=1&per_page=50` | 多选写入 `outfit` store；确认后进日记页（本页不建 outfit） |
-| **diary/create** | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids` + `increase_wear_count: true`，可选 mood/content/photo_url） | 跳过/完成都只调一次 wear-logs，不再建临时 outfit |
-| **timeline** | `GET /api/wear-logs`；`DELETE /api/wear-logs/:id` | 编辑跳转 `diary/edit?log_id=` |
-| **diary/edit** | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id`（仅 mood、content） | |
-| **mine** | `GET /api/auth/profile`；`GET /api/items?page=1&per_page=1`；`GET /api/wear-logs?page=1&per_page=1` | 用两接口的 `total` 作统计；退出仅清本地态 |
+用户在「我的」主动退出后写入 `sw_manual_logout`，小程序端不再自动静默登录，直到用户在登录页手动登录。
 
-未在前端页面直接调用的后端能力：`GET /api/outfits/:id`、`GET /api/v1/test/*`、浏览器调试台 `/`。
+### 4.2 各页调用的接口与主要跳转
+
+| 页面 | 接口 | 说明 |
+|------|------|------|
+| login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 成功后 `switchTab` 首页 |
+| register | `POST /api/auth/register` | 成功后返回登录页，不自动登录 |
+| index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend` | 天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
+| item/list | `GET /api/items`（筛选+分页）；`DELETE /api/items/:id` | 点卡片进 `item/add?id=` |
+| item/add | `POST /api/upload` → `POST /api/ai/cutout` → `POST /api/ai/recognize-item`；`GET/POST/PUT/DELETE /api/items` | 新增时上传后自动抠图（可用回原图或重新抠），抠完自动识别并回填合法选项；AI 调用均 silent，失败不打断手动填写 |
+| outfit/canvas | `GET /api/items` | 拖动、缩放衣物生成 `collage`，写入 outfit store；可在推荐结果里「换一套」；确认后跳 `diary/create` |
+| outfit/select | `GET /api/items?page=1&per_page=50` | 见 4.1 备注 |
+| diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`increase_wear_count: true`） | 成功后清空 store，`switchTab` 时间轴；未传 temperature / weather |
+| timeline | `GET /api/wear-logs`；`DELETE /api/wear-logs/:id` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；编辑跳 `diary/edit?log_id=`；无详情页 |
+| diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
+| mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total） | 退出只清本地状态 |
+
+前端未调用的后端能力：`/api/outfits/*`、测试接口、调试台。
 
 ### 4.3 前端状态与常量
 
-- `store/user.js`：token / userInfo ↔ `sw_token` / `sw_user`
-- `store/outfit.js`：跨页已选衣物；`selectedItemIds` 供 `POST /api/wear-logs`
+- `store/user.js`：token / userInfo，本地缓存 key 为 `sw_token` / `sw_user`；`wxLogin()` 手动微信登录；`logout()` 写入 `sw_manual_logout`
+- `store/outfit.js`：`selectedItems`（跨页已选衣物，只保留 item_id/image_url/type/color/season）、`collage`、`recommendList` / `recommendIndex`（首页推荐整批结果，画布页轮换用）
 - `utils/constants.js`：类型/季节/场合/颜色/心情与后端枚举对齐
 
----
+### 4.4 小程序配置（`manifest.json` → `mp-weixin`）
 
-## 5. 已知问题
-
-（以下为仓库现状事实，与用户指定条目一致。）
-
-### 5.1 日记提交不再创建临时 outfit
-
-`pages/diary/create.vue` 只 `POST /api/wear-logs`（`item_ids`）。历史无名 outfit 仍可能留在库中，无自动清理。
-
-### 5.2 `BASE_URL` 写死
-
-`client/src/utils/config.js`：
-
-```js
-export const BASE_URL = 'http://127.0.0.1:5001'
-```
-
-注释提到真机需改局域网 IP，但代码无环境变量/构建替换。微信小程序真机若仍用 `127.0.0.1` 会连不上本机后端。
-
-### 5.3 接口前缀 `/api` 与 `/api/v1/test` 不一致
-
-`create_app` 中 test 蓝图为 `/api/v1/test`，auth/items/outfits/wear-logs/recommend/upload 为 `/api/...`（无版本段）。客户端业务路径均走 `/api/...`，仅调试台会打 test。
-
-### 5.4 `config.py` 弱默认密钥与数据库密码
-
-缺省环境变量时：
-
-| 配置项 | 默认值 |
-|--------|--------|
-| `SECRET_KEY` | `dev-secret-key-change-me` |
-| `JWT_SECRET_KEY` | `jwt-dev-secret-change-me` |
-| `DB_PASSWORD` | `root`（另有 `DB_USER=root` 等） |
-
-仅适合本地开发；生产若未覆盖环境变量存在风险。
+- `appid` 为空（尚未注册小程序）
+- 已声明 `scope.userLocation`（用途说明：获取当地气温推荐穿搭）与 `requiredPrivateInfos: ["getLocation"]`
+- `urlCheck: false`（仅开发期可用，上线须配置合法域名）
+- 没有隐私授权弹窗处理（`wx.onNeedPrivacyAuthorization` 等）
 
 ---
 
-## 6. 其它已观察到的差异（非猜测结论处标待确认）
+## 5. 已知问题与上线差距
 
-| 点 | 说明 |
+### 5.1 小程序上线阻塞项
+
+| 项 | 现状 |
 |----|------|
-| schema vs 注册 | `user.email` schema 可空，注册服务强制邮箱 |
-| schema vs 创建日记 | `wear_log.outfit_id` 可空；服务层主路径写 NULL，旧请求仍可传 `outfit_id` |
-| 日记字数 | 前端日记页限制 100 字；后端 `content` 最长 500 |
-| MVP 文档 vs 实现 | 规划中有「搭配命名保存/搭配 tab」等；当前无 outfit 列表页，确认穿搭走 `item_ids` 直写日记 |
-| `AppLoading` / `AppEmpty` | 组件已实现；多数业务页仍手写 loading/empty（待确认是否计划统一替换） |
-| `useRequest` | 已封装，首页/时间轴等多数未采用 |
+| 微信登录联调 | 代码已完成（静默登录、不强制跳登录页），需注册小程序后在 `server/.env` 配置 `WX_APPID` / `WX_APPSECRET`，并在 `manifest.json` 填 appid 后真机验证 |
+| 隐私合规 | 无隐私授权弹窗、无用户协议/隐私政策页、无注销账号与数据删除 |
+| 内容安全 | 日记文字、上传图片没有接入内容安全检测（是否必须：待确认） |
+| 生产部署 | 只有 Flask 开发服务器（`run.py`），无 WSGI 服务器、反向代理、HTTPS 配置；`ProductionConfig` 仅设 `DEBUG=False` |
+| 域名与 AppID | `client/.env.production` 中 `VITE_API_BASE` 为占位地址 `https://api.example.com`；`manifest.json` 的 `appid` 为空 |
+
+### 5.2 安全与运维
+
+- `/uploads/<filename>` 无需鉴权即可访问，靠 uuid 文件名防猜测；日记现场照等私人图片也走这里
+- 上传只按扩展名判断格式，不校验图片内容；服务端不做压缩
+- 登录、注册没有频率限制；AI 频率限制和天气缓存都是进程内存，多进程或重启后失效
+- 没有数据库与上传目录的备份方案
+- rembg 首次加载模型较慢、内存占用较大，服务器配置需评估（待确认具体占用）
+- `ALLOWED_ORIGINS` 默认 `*`，生产需收紧（小程序请求不受 CORS 影响，H5 受影响）
+
+### 5.3 功能缺口（相对 `MVP规划文档.md`）
+
+- 搭配方案：后端没有列表和删除接口，前端没有「我的搭配」页，画布拼好的搭配不能保存复用
+- 推荐：没有「近 7 天穿过降权」，不考虑场合，不含鞋包配饰
+- 时间轴：没有当日详情页；日记编辑只能改心情和文字（照片、日期、衣物不能改）
+- 规划中「衣物不足 2 件时入口置灰提示」未实现（仅 `outfit/select` 有「至少选一件」提示）
+- 日记创建未记录当天温度、天气（接口支持，前端未传）
+
+### 5.4 工程与一致性
+
+- `schema.sql` 缺 `wear_log.collage`，与迁移不同步
+- 接口前缀 `/api` 与 `/api/v1/test` 不一致（test 仅 DEBUG 注册，影响小）
+- `pages/outfit/select` 无入口
+- `AppLoading` / `AppEmpty` / `useRequest` 已封装，多数页面未使用
+- 测试中大量使用 `datetime.utcnow()`，pytest 有弃用警告（不影响结果）
+- 本机 `server/venv` 曾随项目目录移动，venv 内脚本路径可能指向旧目录，必要时重建
 
 ---
 
-## 7. 快速启动备忘（只读归纳）
+## 6. 与 MVP 规划的主要差异
 
-1. MySQL 执行 `schema.sql`（库名默认 `smart_wardrobe`）。
-2. `server`：配置 `.env`（可选）→ `pip install -r requirements.txt` → `python run.py`（5001）。
-3. `client`：`npm i` → `npm run dev:h5`（8081）或 `dev:mp-weixin`；确保 `BASE_URL` 可达后端。
+| 点 | 规划 | 实际 |
+|----|------|------|
+| tabBar | 衣橱 / 搭配 / 记录 / 我的 | 首页 / 衣橱 / 时间轴 / 我的（无搭配 tab） |
+| 确认穿搭 | 选已保存方案或临时多选 | 画布手动拼或用推荐结果，直接按 `item_ids` 写日记 |
+| AI / 天气 | 列为后期扩展 | 已实现 AI 识别、本地抠图、和风天气 |
+| 接口前缀 | `/api/v1` | `/api`（无版本段） |
+| 注册字段 | 用户名 + 密码 | 用户名 + 邮箱 + 密码 |
+
+---
+
+## 7. 启动与配置备忘
+
+### 7.1 后端环境变量（`server/.env`，模板见 `server/.env.example`）
+
+> ⚠️ `server/.env` 含真实密钥，只在本机手动编辑，不提交仓库，也不要发给 AI 或他人。
+
+| 变量 | 必填 | 用途 |
+|------|------|------|
+| `SECRET_KEY`、`JWT_SECRET_KEY` | 是 | 非 testing 环境缺失时启动直接报错 |
+| `JWT_ACCESS_TOKEN_EXPIRES` | 否 | Token 有效期（秒），默认 7 天 |
+| `WX_APPID`、`WX_APPSECRET` | 小程序必填 | 微信一键登录；不填则 `/api/auth/wx-login` 返回 1006 |
+| `DB_USER`、`DB_PASSWORD`、`DB_HOST`、`DB_PORT`、`DB_NAME` | 是 | MySQL 连接（host/port/name 有默认值） |
+| `ALLOWED_ORIGINS` | 否 | CORS 来源，逗号分隔，默认 `*` |
+| `UPLOAD_FOLDER` | 否 | 上传目录，默认 `server/uploads` |
+| `PUBLIC_BASE_URL` | 上线必填 | 图片对外域名前缀（如 `https://api.xxx.com`） |
+| `QWEATHER_API_KEY`、`QWEATHER_API_HOST` | 否 | 和风天气；不填则前端手动调温度 |
+| `DASHSCOPE_API_KEY` | 否 | 阿里云百炼；不填则不做 AI 识别 |
+| `DASHSCOPE_BASE_URL`、`QWEN_VL_MODEL` | 否 | 一般留空用默认 |
+| `REMBG_MODEL`、`CUTOUT_MAX_SIDE`、`CUTOUT_POST_PROCESS` | 否 | 抠图模型、缩放边长、掩码后处理开关 |
+| `FLASK_CONFIG` | 否 | `run.py` 读取，`development`（默认）/ `production` |
+
+`run.py` 先 `load_dotenv(server/.env, override=True)` 再导入 app。
+
+### 7.2 前端环境变量
+
+| 文件 | 内容 | 是否入库 |
+|------|------|----------|
+| `client/.env.development` | `VITE_API_BASE=http://127.0.0.1:5001` | 是 |
+| `client/.env.production` | `VITE_API_BASE=https://api.example.com`（占位） | 是 |
+| `client/.env.development.local` | 真机调试时写电脑局域网 IP | 否（gitignore） |
+
+### 7.3 启动步骤
+
+1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
+2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
+3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
+4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 70 项通过）

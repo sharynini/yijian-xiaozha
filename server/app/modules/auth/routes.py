@@ -50,6 +50,25 @@ def login():
     }, msg='登录成功')
 
 
+@auth_bp.post('/wx-login')
+def wx_login():
+    """
+    微信小程序一键登录（openid 不存在则自动注册）
+    POST /api/auth/wx-login
+    Body: { "code": "wx.login 返回的 code" }
+    返回: { access_token, user, is_new }
+    """
+    data = request.get_json(silent=True) or {}
+
+    user, access_token, is_new = AuthService.wx_login(code=data.get('code'))
+
+    return success(data={
+        'access_token': access_token,
+        'user': user.to_dict(),
+        'is_new': is_new,
+    }, msg='登录成功')
+
+
 @auth_bp.get('/profile')
 @jwt_required()
 def profile():

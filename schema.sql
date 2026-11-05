@@ -1,6 +1,9 @@
 -- ============================================================
 -- 智能衣橱 + 轻量穿搭日记 数据库建表脚本
 -- MySQL 5.7+ / utf8mb4 / InnoDB
+-- 与 Alembic 迁移 c3e5a7d9b1f2（add user openid）同步。
+-- 用本脚本新建库后，在 server/ 下执行一次 `flask db stamp head`，告诉迁移工具已是最新版本；
+-- 已有的库不要执行本脚本，直接 `flask db upgrade`。
 -- ============================================================
 
 CREATE DATABASE IF NOT EXISTS `smart_wardrobe`
@@ -16,7 +19,8 @@ CREATE TABLE `user` (
     `id`              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `username`        VARCHAR(50)         NOT NULL COMMENT '登录用户名',
     `email`           VARCHAR(100)        DEFAULT NULL COMMENT '邮箱地址（选填）',
-    `password_hash`   VARCHAR(255)        NOT NULL COMMENT '密码哈希（如 bcrypt）',
+    `password_hash`   VARCHAR(255)        DEFAULT NULL COMMENT '密码哈希；微信登录创建的账号为 NULL',
+    `openid`          VARCHAR(64)         DEFAULT NULL COMMENT '微信小程序 openid；账号密码注册的用户为 NULL',
     `nickname`        VARCHAR(50)         DEFAULT NULL COMMENT '用户昵称',
     `avatar`          VARCHAR(500)        DEFAULT NULL COMMENT '头像图片URL',
     `created_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
@@ -25,6 +29,7 @@ CREATE TABLE `user` (
     PRIMARY KEY (`id`),
     UNIQUE KEY `uk_username` (`username`),
     UNIQUE KEY `uk_email` (`email`),
+    UNIQUE KEY `uk_openid` (`openid`),
     KEY `idx_deleted_at` (`deleted_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户表';
 
@@ -106,6 +111,7 @@ CREATE TABLE `wear_log` (
     `temperature`     DECIMAL(4,1)        DEFAULT NULL COMMENT '当日温度，如 25.5',
     `weather`         VARCHAR(20)         DEFAULT NULL COMMENT '天气：晴/多云/阴/雨/雪等',
     `items_snapshot`  JSON                DEFAULT NULL COMMENT '当天衣物快照（item_id列表及当时信息），支持非outfit穿搭记录',
+    `collage`         JSON                DEFAULT NULL COMMENT '手动搭配画布布局 [{item_id,x,y,w,z}]，x/y/w 为相对画布边长的 0~1 比例',
     `created_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted_at`      DATETIME            DEFAULT NULL COMMENT '软删除时间',
