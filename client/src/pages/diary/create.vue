@@ -91,6 +91,26 @@ function submit() {
   _doSubmit()
 }
 
+// 首页查到的实时天气（30 分钟内有效）随日记一起保存，详情页可显示当天天气
+const WEATHER_CACHE_KEY = 'sw_weather'
+const WEATHER_CACHE_MS = 30 * 60 * 1000
+
+function cachedWeather() {
+  try {
+    const c = uni.getStorageSync(WEATHER_CACHE_KEY)
+    if (c && c.data && Date.now() - c.ts < WEATHER_CACHE_MS) {
+      const t = Number(c.data.temperature)
+      return {
+        temperature: Number.isFinite(t) ? t : null,
+        weather: (c.data.text || '').slice(0, 20) || null
+      }
+    }
+  } catch (e) {
+    // 读不到缓存就不带天气
+  }
+  return { temperature: null, weather: null }
+}
+
 async function _doSubmit() {
   if (submitting.value) return
   submitting.value = true
@@ -102,6 +122,7 @@ async function _doSubmit() {
       content: content.value.trim() || null,
       photo_url: photoUrl.value || null,
       collage: store.collage,
+      ...cachedWeather(),
       increase_wear_count: true,
     })
 

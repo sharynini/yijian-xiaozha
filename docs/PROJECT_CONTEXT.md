@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）；时间轴详情页，日记记录当天温度与天气。
 
 ---
 
@@ -331,6 +331,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 载入推荐结果；`?outfit_id=` 载入已保存搭配（标题「编辑搭配」） |
 | pages/diary/create | 轻量日记 | 否 | |
 | pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
+| pages/timeline/detail | 日记详情 | 否 | `?log_id=`；时间轴点卡片进入 |
 | pages/diary/edit | 编辑日记 | 否 | |
 | pages/mine/index | 我的小窝 | 我的 | 自定义导航栏 |
 | pages/login/login | 登录 | 否 | |
@@ -352,8 +353,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | item/list | 衣物标签：`GET /api/items`（筛选+分页）、`DELETE /api/items/:id`；搭配标签：`components/OutfitList.vue` 调 `GET/PUT/DELETE /api/outfits` | 衣物卡片进 `item/add?id=`；搭配卡片弹出「今天穿这套（写 store → `diary/create`）/ 在画布中编辑（`outfit/canvas?outfit_id=`）/ 重命名 / 删除」；下拉刷新、上拉加载按当前标签分别处理 |
 | item/add | `POST /api/upload` → `POST /api/ai/cutout` → `POST /api/ai/recognize-item`；`GET/POST/PUT/DELETE /api/items` | 新增时上传后自动抠图（可用回原图或重新抠），抠完自动识别并回填合法选项；AI 调用均 silent，失败不打断手动填写 |
 | outfit/canvas | `GET /api/items`；`GET /api/outfits/:id`（编辑时）；`POST /api/outfits`（保存）；`PUT /api/outfits/:id`（更新这套） | 拖动、缩放衣物生成 `collage`；「♡ 保存」存为搭配（名字选填）；编辑已有搭配时可选「更新这套 / 另存为新搭配」；「用这套去打卡」写入 outfit store 跳 `diary/create`；推荐进入时可「换一套」 |
-| diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`increase_wear_count: true`） | 成功后清空 store，`switchTab` 时间轴；未传 temperature / weather |
-| timeline | `GET /api/wear-logs`；`DELETE /api/wear-logs/:id` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；编辑跳 `diary/edit?log_id=`；无详情页 |
+| diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`temperature`、`weather`、`increase_wear_count: true`） | 温度、天气取首页 30 分钟内的天气缓存 `sw_weather`，没有则为 null（手动调的温度不记录）；成功后清空 store，`switchTab` 时间轴 |
+| timeline | `GET /api/wear-logs` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；点卡片进 `timeline/detail?log_id=`；卡片上「💬」直接进 `diary/edit`；「⭐」只存在页面内存，刷新即丢失；`onShow` 时刷新列表 |
+| timeline/detail | `GET /api/wear-logs/:id`；逐件静默 `GET /api/items/:id`（检查是否已删除）；`DELETE /api/wear-logs/:id` | 展示日期、天气温度、拼贴图（无则缩略图）、心情、一句话、现场照（可预览）、衣物清单（在衣橱的可点进编辑，已删的标注）；底部「删除这条记录 / 编辑心情和日记」；从编辑页返回时重新加载 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
 | mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存 |
 
@@ -403,9 +405,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 
 - 搭配方案不参与「今日推荐」（4b 评估后暂不做，等实际使用再定）
 - 推荐：不含包包、帽子、配饰；「换一批」只在同一批 3 套内轮换
-- 时间轴：没有当日详情页；日记编辑只能改心情和文字（照片、日期、衣物不能改）
+- 日记编辑只能改心情和文字（照片、日期、衣物不能改）；时间轴「⭐」收藏未持久化
 - 规划中「衣物不足 2 件时入口置灰提示」未实现（画布页空时有「先往画布上放几件衣服吧」提示）
-- 日记创建未记录当天温度、天气（接口支持，前端未传）
+- 2026-11-05 之前的日记没有温度、天气；之后只有在首页成功定位查到天气时才会记录
 
 ### 5.4 工程与一致性
 

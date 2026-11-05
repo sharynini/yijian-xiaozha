@@ -5,7 +5,7 @@
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
-import { get, del } from '@/utils/request'
+import { get } from '@/utils/request'
 import { MOODS } from '@/utils/constants'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
@@ -110,34 +110,13 @@ onPullDownRefresh(() => {
 
 onReachBottom(() => { loadMore() })
 
+// 点卡片进入详情页；编辑、删除都在详情页里做（返回时 onShow 会刷新列表）
 function onCardTap(log) {
-  uni.showActionSheet({
-    itemList: ['编辑心情和日记', '删除这条记录'],
-    success: (res) => {
-      if (res.tapIndex === 0) editLog(log)
-      if (res.tapIndex === 1) deleteLog(log)
-    }
-  })
+  uni.navigateTo({ url: `/pages/timeline/detail?log_id=${log.log_id}` })
 }
 
 function editLog(log) {
   uni.navigateTo({ url: `/pages/diary/edit?log_id=${log.log_id}` })
-}
-
-function deleteLog(log) {
-  uni.showModal({
-    title: '确认删除',
-    content: `删除「${friendlyDate(log.wear_date)}」的穿搭日记？`,
-    confirmColor: '#ff8fb1',
-    success: async (res) => {
-      if (!res.confirm) return
-      try {
-        await del(`/api/wear-logs/${log.log_id}`)
-        uni.showToast({ title: '已删除', icon: 'success' })
-        fetchLogs(true)
-      } catch (e) { /* toast */ }
-    }
-  })
 }
 
 function toggleStar(e, id) {

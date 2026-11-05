@@ -53,6 +53,14 @@
       }
     },
     {
+      "path": "pages/timeline/detail",
+      "style": {
+        "navigationBarTitleText": "日记详情",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
+      }
+    },
+    {
       "path": "pages/diary/edit",
       "style": {
         "navigationBarTitleText": "编辑日记"
