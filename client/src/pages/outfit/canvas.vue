@@ -9,13 +9,17 @@
  *   - /pages/outfit/canvas                 空白画布，自己搭
  *   - /pages/outfit/canvas?from=recommend  首页智能推荐进入：按衣物类型自动摆好，
  *                                          顶部多一个「换一套推荐」按钮
+ *   - /pages/outfit/canvas?outfit_id=12    从「衣橱 → 搭配」进入：按保存的布局还原，
+ *                                          保存时可「更新这套」或「另存为新搭配」
+ *
+ * 底部「保存」：存成搭配方案（名字选填，不填后端自动命名），之后在「衣橱 → 搭配」里查看
  *
  * 用 movable-area / movable-view 实现拖动：H5 与微信小程序都原生支持，不引入新依赖。
  * 布局以「相对画布边长的比例」保存（x / y / w 都是 0~1），换屏幕尺寸也能还原。
  */
 import { ref, computed } from 'vue'
 import { onLoad } from '@dcloudio/uni-app'
-import { get } from '@/utils/request'
+import { get, post, put } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
 import { ITEM_TYPES } from '@/utils/constants'
 import SafeImage from '@/components/SafeImage.vue'
@@ -78,6 +82,22 @@ function layoutCombo(items) {
   })
   selectedId.value = null
   touched.value = false
+}
+
+/** 按保存的布局（相对比例）摆放；布局里没有的衣物按类型默认位置补上 */
+function layoutFromCollage(items, collage) {
+  const byId = {}
+  ;(collage || []).forEach((e) => { byId[e.item_id] = e })
+  layoutCombo(items)
+  pieces.value.forEach((p) => {
+    const e = byId[p.item_id]
+    if (!e) return
+    p.size = Math.round(side * e.w)
+    p.x = side * e.x
+    p.y = side * e.y
+    p.z = e.z
+    clampPos(p)
+  })
 }
 
 function showRecommend(index) {
@@ -236,8 +256,30 @@ async function loadShelf(type) {
   }
 }
 
+// ---------- 编辑已保存的搭配 ----------
+const editingOutfit = ref(null)   // { outfit_id, name }，从「我的搭配」进入时才有
+
+async function loadOutfit(outfitId) {
+  try {
+    const data = await get(`/api/outfits/${outfitId}`, {}, { loading: true })
+    editingOutfit.value = { outfit_id: data.outfit_id, name: data.name }
+    uni.setNavigationBarTitle({ title: '编辑搭配' })
+    if (!data.items || !data.items.length) {
+      uni.showToast({ title: '这套里的衣服都被删除了，重新搭一套吧', icon: 'none' })
+      return
+    }
+    layoutFromCollage(data.items, data.collage)
+  } catch (e) {
+    // request.js 已提示
+  }
+}
+
 onLoad((query = {}) => {
   loadShelf('')
+  if (query.outfit_id) {
+    loadOutfit(query.outfit_id)
+    return
+  }
   if (query.from === 'recommend' && store.recommendList.length) {
     fromRecommend.value = true
     uni.setNavigationBarTitle({ title: '推荐搭配' })
@@ -245,12 +287,8 @@ onLoad((query = {}) => {
   }
 })
 
-// ---------- 去打卡 ----------
-function goDiary() {
-  if (!pieces.value.length) {
-    uni.showToast({ title: '先往画布上放几件衣服吧', icon: 'none' })
-    return
-  }
+// ---------- 当前画布 → 衣物顺序 + 布局（相对比例） ----------
+function snapshot() {
   const ordered = [...pieces.value].sort((a, b) => a.z - b.z)
   const collage = ordered.map((p, i) => ({
     item_id: p.item_id,
@@ -259,8 +297,96 @@ function goDiary() {
     w: +(p.size / side).toFixed(4),
     z: i + 1
   }))
+  return { ordered, collage }
+}
+
+function ensureNotEmpty() {
+  if (pieces.value.length) return true
+  uni.showToast({ title: '先往画布上放几件衣服吧', icon: 'none' })
+  return false
+}
+
+// ---------- 去打卡 ----------
+function goDiary() {
+  if (!ensureNotEmpty()) return
+  const { ordered, collage } = snapshot()
   store.setOutfit(ordered, collage)
   uni.navigateTo({ url: '/pages/diary/create' })
+}
+
+// ---------- 保存为搭配 ----------
+const saving = ref(false)
+
+function onSave() {
+  if (saving.value || !ensureNotEmpty()) return
+  const editing = editingOutfit.value
+  if (!editing) {
+    askNameAndCreate()
+    return
+  }
+  uni.showActionSheet({
+    itemList: [`更新「${editing.name}」`, '另存为新搭配'],
+    success: ({ tapIndex }) => {
+      if (tapIndex === 0) updateOutfit()
+      // 等动作面板收起再弹输入框，否则 H5 端第二个弹窗会被吞掉
+      else setTimeout(askNameAndCreate, 350)
+    }
+  })
+}
+
+function askNameAndCreate() {
+  uni.showModal({
+    title: '保存为搭配',
+    editable: true,
+    placeholderText: '给这套起个名字（可不填）',
+    confirmText: '保存',
+    confirmColor: '#ff8fb1',
+    success: (res) => {
+      if (!res.confirm) return
+      const name = (res.content || '').trim()
+      if (name.length > 30) {
+        uni.showToast({ title: '名字最多 30 个字', icon: 'none' })
+        return
+      }
+      createOutfit(name)
+    }
+  })
+}
+
+async function createOutfit(name) {
+  const { ordered, collage } = snapshot()
+  saving.value = true
+  try {
+    const data = await post('/api/outfits', {
+      item_ids: ordered.map((p) => p.item_id),
+      name: name || null,
+      collage
+    }, { loading: true, loadingText: '保存中...' })
+    editingOutfit.value = { outfit_id: data.outfit_id, name: data.name }
+    touched.value = false
+    uni.showToast({ title: `已保存「${data.name}」，在衣橱 → 搭配里查看`, icon: 'none', duration: 2000 })
+  } catch (e) {
+    // request.js 已提示
+  } finally {
+    saving.value = false
+  }
+}
+
+async function updateOutfit() {
+  const { ordered, collage } = snapshot()
+  saving.value = true
+  try {
+    await put(`/api/outfits/${editingOutfit.value.outfit_id}`, {
+      item_ids: ordered.map((p) => p.item_id),
+      collage
+    }, { loading: true, loadingText: '保存中...' })
+    touched.value = false
+    uni.showToast({ title: '已更新', icon: 'success' })
+  } catch (e) {
+    // request.js 已提示
+  } finally {
+    saving.value = false
+  }
 }
 
 function goAdd() {
@@ -350,6 +476,7 @@ function goAdd() {
 
     <view class="footer">
       <view class="count">已放 {{ pieces.length }} 件</view>
+      <view class="save" :class="{ off: !pieces.length }" @click="onSave">♡ 保存</view>
       <view class="go" :class="{ off: !pieces.length }" @click="goDiary">用这套去打卡 ✎</view>
     </view>
   </view>
@@ -556,6 +683,21 @@ function goAdd() {
 .count {
   font-size: 24rpx;
   color: #8a7f88;
+}
+.save {
+  height: 84rpx;
+  line-height: 84rpx;
+  padding: 0 28rpx;
+  border-radius: 999rpx;
+  border: 2rpx dashed #ffb3c9;
+  color: #ff8fb1;
+  font-size: 28rpx;
+  font-weight: 700;
+  background: #fff8f5;
+}
+.save.off {
+  color: #d9c3cb;
+  border-color: #f0dbe2;
 }
 .go {
   flex: 1;

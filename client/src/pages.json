@@ -29,12 +29,6 @@
       }
     },
     {
-      "path": "pages/outfit/select",
-      "style": {
-        "navigationBarTitleText": "选择今日穿搭"
-      }
-    },
-    {
       "path": "pages/outfit/canvas",
       "style": {
         "navigationBarTitleText": "手动搭配",

@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页。
 
 ---
 
@@ -75,7 +75,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 |------|------|--------|
 | 1xxx | 认证 | 1001 用户名已存在；1002 邮箱已注册；1003 用户名或密码错误；1004 参数错误；1005 用户不存在或已删除；1006 微信登录未配置；1007 微信 code 无效或已使用；1008 微信服务异常；1009 注销失败 |
 | 2xxx | 衣物 | 2001 不存在；2002 参数不合法 |
-| 3xxx | 搭配 | 3001 搭配不存在 / 含无效衣物；3002 item_ids 参数错误 |
+| 3xxx | 搭配 | 3001 搭配不存在 / 含无效衣物；3002 参数错误（item_ids、名称、collage） |
 | 4xxx | 穿搭日记 | 4001 不存在；4002 参数错误；4003 衣物不属于当前用户；4004 衣物已删除；4005 collage 结构错误 |
 | 5xxx | 推荐 | 5002 temperature 缺失 / 非数字 / 超范围 |
 | 6xxx | 上传 | 6001 未选文件 / 格式不支持 |
@@ -143,10 +143,21 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 | 方法 | 路径 | 请求字段 | 响应 `data` |
 |------|------|----------|-------------|
-| POST | `/api/outfits` | `item_ids`（非空整数数组）；`name`（可选） | `outfit_id`、`user_id`、`name`、`created_at`、`items`、`item_count` |
-| GET | `/api/outfits/<outfit_id>` | — | 同上 |
+| POST | `/api/outfits` | `item_ids`（1~12 件）；`name`（选填，≤30 字，空则自动命名「M月D日的搭配」）；`collage`（选填） | 搭配详情（见下） |
+| GET | `/api/outfits` | Query：`page`、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list: 搭配详情[] }` |
+| GET | `/api/outfits/<outfit_id>` | — | 搭配详情 |
+| PUT | `/api/outfits/<outfit_id>` | 部分更新：`name`（不能为空）、`item_ids`（整体替换）、`collage` | 搭配详情 |
+| DELETE | `/api/outfits/<outfit_id>` | — | 软删除；`msg`「搭配已删除」 |
 
-无列表、更新、删除接口；前端目前没有任何页面调用 outfits 接口。
+搭配详情：`outfit_id`、`user_id`、`name`、`collage`、`created_at`、`updated_at`、`items`（`Item.to_dict[]`，只含未删除衣物，按加入顺序）、`item_count`。
+
+规则（`outfit/services.py`）：
+
+- 列表只返回 `name` 非空、未删除的搭配，按 `updated_at` 倒序；`name` 为 NULL 的是早期日记流程自动建的临时搭配，不展示
+- 衣物被删除后，详情和列表里自动去掉该衣物以及 `collage` 中对应的项；全部被删时 `item_count = 0`
+- `PUT` 只改 `item_ids` 不传 `collage` 时，旧布局里已移除的衣物会被去掉；任何更新都会刷新 `updated_at`
+- `collage` 校验与日记共用 `app/common/collage.py`（搭配用错误码 3002，日记用 4005）
+- 删除搭配不影响已记录的日记（日记有自己的衣物快照）
 
 ### 2.5 穿搭日记（前缀 `/api/wear-logs`，均需 JWT）
 
@@ -228,7 +239,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 ### 3.0 迁移
 
-- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid`
+- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage`
 - 已有库升级：`cd server && flask db upgrade`（需已加载 `server/.env`；具体 `FLASK_APP` 设置：待确认）
 - 新建库：执行 `schema.sql`（已与最新迁移同步），再执行 `flask db stamp head`
 - 改模型后：`flask db migrate -m "说明"` 生成脚本，检查后 `flask db upgrade`
@@ -266,9 +277,9 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 ### 3.3 `outfit` / 3.4 `outfit_item`
 
-- `outfit`：`id`、`user_id`、`name`（可空）、`created_at`、`updated_at`、`deleted_at`
+- `outfit`：`id`、`user_id`、`name`（可空；新建时一定有值，NULL 为早期遗留）、`collage`（JSON，可空，画布布局）、`created_at`、`updated_at`、`deleted_at`
 - `outfit_item`：`id`、`outfit_id`（FK CASCADE）、`item_id`（FK CASCADE），UNIQUE(outfit_id, item_id)
-- 当前只由 `POST /api/outfits` 写入；历史上日记流程创建过的无名 outfit 可用 `server/scripts/cleanup_orphan_outfits.py` 清理
+- 由 `POST/PUT /api/outfits` 写入；历史上日记流程创建过的无名 outfit 不会出现在列表里，也可用 `server/scripts/cleanup_orphan_outfits.py` 清理
 
 ### 3.5 `wear_log`
 
@@ -312,10 +323,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | path | 标题 | tabBar | 备注 |
 |------|------|--------|------|
 | pages/index/index | 今日推荐 | 首页 | 自定义导航栏 |
-| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏 |
+| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏；顶部「衣物 / 搭配」标签 |
 | pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=` |
-| pages/outfit/select | 选择今日穿搭 | 否 | 当前没有页面跳转到这里（入口已被画布页取代），待确认是否删除 |
-| pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 时载入推荐结果 |
+| pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 载入推荐结果；`?outfit_id=` 载入已保存搭配（标题「编辑搭配」） |
 | pages/diary/create | 轻量日记 | 否 | |
 | pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
 | pages/diary/edit | 编辑日记 | 否 | |
@@ -336,21 +346,22 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 须先勾选同意《用户协议》《隐私政策》；成功后 `switchTab` 首页 |
 | register | `POST /api/auth/register` | 成功后返回登录页，不自动登录 |
 | index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend` | 天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
-| item/list | `GET /api/items`（筛选+分页）；`DELETE /api/items/:id` | 点卡片进 `item/add?id=` |
+| item/list | 衣物标签：`GET /api/items`（筛选+分页）、`DELETE /api/items/:id`；搭配标签：`components/OutfitList.vue` 调 `GET/PUT/DELETE /api/outfits` | 衣物卡片进 `item/add?id=`；搭配卡片弹出「今天穿这套（写 store → `diary/create`）/ 在画布中编辑（`outfit/canvas?outfit_id=`）/ 重命名 / 删除」；下拉刷新、上拉加载按当前标签分别处理 |
 | item/add | `POST /api/upload` → `POST /api/ai/cutout` → `POST /api/ai/recognize-item`；`GET/POST/PUT/DELETE /api/items` | 新增时上传后自动抠图（可用回原图或重新抠），抠完自动识别并回填合法选项；AI 调用均 silent，失败不打断手动填写 |
-| outfit/canvas | `GET /api/items` | 拖动、缩放衣物生成 `collage`，写入 outfit store；可在推荐结果里「换一套」；确认后跳 `diary/create` |
-| outfit/select | `GET /api/items?page=1&per_page=50` | 见 4.1 备注 |
+| outfit/canvas | `GET /api/items`；`GET /api/outfits/:id`（编辑时）；`POST /api/outfits`（保存）；`PUT /api/outfits/:id`（更新这套） | 拖动、缩放衣物生成 `collage`；「♡ 保存」存为搭配（名字选填）；编辑已有搭配时可选「更新这套 / 另存为新搭配」；「用这套去打卡」写入 outfit store 跳 `diary/create`；推荐进入时可「换一套」 |
 | diary/create | `POST /api/upload`（可选现场照）；`POST /api/wear-logs`（`item_ids`、`mood`、`content`、`photo_url`、`collage`、`increase_wear_count: true`） | 成功后清空 store，`switchTab` 时间轴；未传 temperature / weather |
 | timeline | `GET /api/wear-logs`；`DELETE /api/wear-logs/:id` | 有 `collage` 时用 `OutfitCollage` 还原拼贴；编辑跳 `diary/edit?log_id=`；无详情页 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
 | mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存 |
 
-前端未调用的后端能力：`/api/outfits/*`、测试接口、调试台。
+前端未调用的后端能力：测试接口、调试台。
+
+连续弹两个系统弹窗（`showModal` / `showActionSheet`）时，后一个要延迟约 350ms 再弹，否则 H5 端会被吞掉（`mine` 注销、`canvas` 另存、`OutfitList` 重命名/删除都已这样处理）。
 
 ### 4.3 前端状态与常量
 
 - `store/user.js`：token / userInfo，本地缓存 key 为 `sw_token` / `sw_user`；`wxLogin()` 手动微信登录；`logout()` 写入 `sw_manual_logout`；`deleteAccount()` 注销并 `clearStorageSync`
-- `store/outfit.js`：`selectedItems`（跨页已选衣物，只保留 item_id/image_url/type/color/season）、`collage`、`recommendList` / `recommendIndex`（首页推荐整批结果，画布页轮换用）
+- `store/outfit.js`：`selectedItems`（跨页已选衣物，只保留 item_id/image_url/type/color/season）、`collage`、`recommendList` / `recommendIndex`（首页推荐整批结果，画布页轮换用）；`setOutfit()` 供画布、推荐、「今天穿这套」写入
 - `utils/constants.js`：类型/季节/场合/颜色/心情与后端枚举对齐
 
 ### 4.4 小程序配置（`manifest.json` → `mp-weixin`）
@@ -387,17 +398,16 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 
 ### 5.3 功能缺口（相对 `MVP规划文档.md`）
 
-- 搭配方案：后端没有列表和删除接口，前端没有「我的搭配」页，画布拼好的搭配不能保存复用
+- 搭配方案不参与「今日推荐」（计划在 4b 考虑）
 - 推荐：没有「近 7 天穿过降权」，不考虑场合，不含鞋包配饰
 - 时间轴：没有当日详情页；日记编辑只能改心情和文字（照片、日期、衣物不能改）
-- 规划中「衣物不足 2 件时入口置灰提示」未实现（仅 `outfit/select` 有「至少选一件」提示）
+- 规划中「衣物不足 2 件时入口置灰提示」未实现（画布页空时有「先往画布上放几件衣服吧」提示）
 - 日记创建未记录当天温度、天气（接口支持，前端未传）
 
 ### 5.4 工程与一致性
 
 - `schema.sql` 缺 `wear_log.collage`，与迁移不同步
 - 接口前缀 `/api` 与 `/api/v1/test` 不一致（test 仅 DEBUG 注册，影响小）
-- `pages/outfit/select` 无入口
 - `AppLoading` / `AppEmpty` / `useRequest` 已封装，多数页面未使用
 - 测试中大量使用 `datetime.utcnow()`，pytest 有弃用警告（不影响结果）
 - 本机 `server/venv` 曾随项目目录移动，venv 内脚本路径可能指向旧目录，必要时重建
@@ -452,4 +462,4 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 78 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 99 项通过）

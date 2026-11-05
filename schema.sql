@@ -1,7 +1,7 @@
 -- ============================================================
 -- 智能衣橱 + 轻量穿搭日记 数据库建表脚本
 -- MySQL 5.7+ / utf8mb4 / InnoDB
--- 与 Alembic 迁移 c3e5a7d9b1f2（add user openid）同步。
+-- 与 Alembic 迁移 d4f6b8a0c2e3（add outfit collage）同步。
 -- 用本脚本新建库后，在 server/ 下执行一次 `flask db stamp head`，告诉迁移工具已是最新版本；
 -- 已有的库不要执行本脚本，直接 `flask db upgrade`。
 -- ============================================================
@@ -71,7 +71,8 @@ CREATE TABLE `item` (
 CREATE TABLE `outfit` (
     `id`              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_id`         BIGINT UNSIGNED     NOT NULL COMMENT '所属用户ID',
-    `name`            VARCHAR(100)        DEFAULT NULL COMMENT '搭配名称（可选）',
+    `name`            VARCHAR(100)        DEFAULT NULL COMMENT '搭配名称；新建时未填会自动生成，NULL 为早期日记流程遗留的临时搭配',
+    `collage`         JSON                DEFAULT NULL COMMENT '手动搭配画布布局 [{item_id,x,y,w,z}]，x/y/w 为相对画布边长的 0~1 比例',
     `created_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted_at`      DATETIME            DEFAULT NULL COMMENT '软删除时间',

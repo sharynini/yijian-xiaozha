@@ -6,6 +6,7 @@
  *   - 下拉刷新 + 上拉加载更多
  *   - 左滑出现「删除」按钮（软删除 DELETE /api/items/<id>）
  *   - 点击卡片进入编辑页
+ *   - 顶部「衣物 | 搭配」切换：搭配标签显示 OutfitList（我的搭配），下拉刷新 / 上拉加载转交给它
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
@@ -14,6 +15,17 @@ import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
+import OutfitList from '@/components/OutfitList.vue'
+
+// 顶部标签：items 衣物 / outfits 搭配
+const tab = ref('items')
+const outfitListRef = ref(null)
+
+function switchTab(next) {
+  if (tab.value === next) return
+  tab.value = next
+  if (next === 'outfits') outfitListRef.value && outfitListRef.value.reload()
+}
 
 // 左侧分类：value 为空表示「全部」
 const CATEGORIES = [{ label: '全部', value: '' }, ...ITEM_TYPES.map((t) => ({ label: t, value: t }))]
@@ -123,18 +135,24 @@ function clearChip(key) {
 
 // ---------- 生命周期 ----------
 onShow(() => {
-  // 从添加/编辑页返回或切回衣橱 tab 时刷新
-  reload()
+  // 从添加/编辑页、画布页返回或切回衣橱 tab 时刷新当前标签
+  if (tab.value === 'outfits') outfitListRef.value && outfitListRef.value.reload()
+  else reload()
 })
 
 onPullDownRefresh(async () => {
   spinning.value = true
-  await reload()
+  if (tab.value === 'outfits') await (outfitListRef.value && outfitListRef.value.reload())
+  else await reload()
   spinning.value = false
   uni.stopPullDownRefresh()
 })
 
 onReachBottom(() => {
+  if (tab.value === 'outfits') {
+    outfitListRef.value && outfitListRef.value.loadMore()
+    return
+  }
   if (finished.value || loading.value) return
   page.value += 1
   fetchItems(false)
@@ -233,7 +251,17 @@ function cardTags(item) {
 
     <view class="title">我的衣橱👗</view>
 
-    <view class="body">
+    <view class="tabs">
+      <view class="tab" :class="{ on: tab === 'items' }" @click="switchTab('items')">衣物</view>
+      <view class="tab" :class="{ on: tab === 'outfits' }" @click="switchTab('outfits')">搭配</view>
+    </view>
+
+    <!-- 小程序里自定义组件不支持直接 v-show，外面包一层 view -->
+    <view v-show="tab === 'outfits'">
+      <OutfitList ref="outfitListRef" />
+    </view>
+
+    <view v-show="tab === 'items'" class="body">
       <!-- 左侧导航 -->
       <view class="side" :style="{ top: statusPad + 'px' }">
         <view
@@ -304,7 +332,7 @@ function cardTags(item) {
       </view>
     </view>
 
-    <view class="fab press-bounce" @click="goAdd">
+    <view v-if="tab === 'items'" class="fab press-bounce" @click="goAdd">
       <text class="tee">👕</text>
     </view>
 
@@ -360,6 +388,26 @@ function cardTags(item) {
   padding-left: 20rpx;
 }
 
+.tabs {
+  display: flex;
+  justify-content: center;
+  margin: 0 0 20rpx 20rpx;
+}
+.tab {
+  padding: 10rpx 44rpx;
+  margin: 0 8rpx;
+  border-radius: 999rpx;
+  font-size: 28rpx;
+  color: #8a7f88;
+  background: #fffdfb;
+  border: 2rpx dashed #f3d5dc;
+}
+.tab.on {
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
+  border-color: transparent;
+}
 .body {
   display: flex;
   align-items: flex-start;

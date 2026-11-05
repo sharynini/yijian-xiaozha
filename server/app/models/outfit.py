@@ -20,7 +20,9 @@ class Outfit(db.Model):
     id = db.Column(db.BigInteger, primary_key=True, autoincrement=True, comment='主键ID')
     user_id = db.Column(db.BigInteger, db.ForeignKey('user.id', name='fk_outfit_user', ondelete='CASCADE'),
                         nullable=False, comment='所属用户ID')
-    name = db.Column(db.String(100), nullable=True, comment='搭配名称（可选）')
+    name = db.Column(db.String(100), nullable=True, comment='搭配名称；新建时未填会自动生成，NULL 为早期日记流程遗留的临时搭配')
+    collage = db.Column(db.JSON, nullable=True,
+                        comment='手动搭配画布布局 [{item_id,x,y,w,z}]，x/y/w 为相对画布边长的 0~1 比例')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                            server_default=db.text('CURRENT_TIMESTAMP'), comment='创建时间')
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow,
@@ -33,6 +35,7 @@ class Outfit(db.Model):
             'outfit_id': self.id,
             'user_id': self.user_id,
             'name': self.name,
+            'collage': self.collage or None,
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
         }
 
