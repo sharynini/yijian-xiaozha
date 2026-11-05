@@ -6,6 +6,7 @@
 import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
+import { OCCASIONS } from '@/utils/constants'
 import { useOutfitStore } from '@/store/outfit'
 import { useUserStore } from '@/store/user'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
@@ -125,27 +126,35 @@ const recError = ref(false)
 const comboIndex = ref(0)
 
 const currentCombo = computed(() => recommendList.value[comboIndex.value] || null)
+// 卡片上最多展示 4 件（上下装 + 外套 + 鞋子）
+const shownItems = computed(() => ((currentCombo.value && currentCombo.value.items) || []).slice(0, 4))
 
-const matchScore = computed(() => {
-  const combo = currentCombo.value
-  if (!combo) return 0
-  const wears = (combo.items || []).reduce((s, it) => s + (it.wear_count || 0), 0)
-  return Math.min(98, Math.max(78, 94 - wears * 2 - comboIndex.value))
-})
+// ---------- 场合 ----------
+// '' 表示不限；选择记在本机，下次打开沿用
+const OCCASION_KEY = 'sw_occasion'
+const OCCASION_OPTIONS = [{ label: '全部', value: '' }, ...OCCASIONS.map((o) => ({ label: o, value: o }))]
+const occasion = ref('')
+try {
+  const saved = uni.getStorageSync(OCCASION_KEY)
+  if (saved && OCCASIONS.includes(saved)) occasion.value = saved
+} catch (e) {
+  // 读不到本地缓存就用默认值
+}
 
-const taotaoCopy = computed(() => {
-  const combo = currentCombo.value
-  if (!combo) return ''
-  const types = (combo.items || []).map((it) => it.type).join('、')
-  const band = seasonLabel.value || '今天'
-  return `今天${temperature.value}℃很舒服，桃桃帮你挑了这套${band}轻薄通勤搭配，优先选了你穿得比较少的单品，不容易腻哦~（含：${types}）`
-})
+function pickOccasion(value) {
+  if (occasion.value === value || loadingRecommend.value) return
+  occasion.value = value
+  try { uni.setStorageSync(OCCASION_KEY, value) } catch (e) { /* 忽略 */ }
+  fetchRecommend()
+}
 
 async function fetchRecommend() {
   loadingRecommend.value = true
   recError.value = false
   try {
-    const data = await get('/api/recommend', { temperature: temperature.value })
+    const params = { temperature: temperature.value }
+    if (occasion.value) params.occasion = occasion.value
+    const data = await get('/api/recommend', params)
     seasonLabel.value = data.season_label || ''
     recommendList.value = data.list || []
     comboIndex.value = 0
@@ -263,6 +272,17 @@ const todayLine = computed(() => {
       <text class="check-arrow">›</text>
     </view>
 
+    <!-- 场合选择 -->
+    <view class="occasions">
+      <view
+        v-for="opt in OCCASION_OPTIONS"
+        :key="opt.label"
+        class="occ press-bounce"
+        :class="{ on: occasion === opt.value }"
+        @click="pickOccasion(opt.value)"
+      >{{ opt.label }}</view>
+    </view>
+
     <!-- HeroRecommendCard -->
     <view v-if="currentCombo" class="hero-card">
       <view class="tape" />
@@ -272,9 +292,9 @@ const todayLine = computed(() => {
         <text>{{ loadingRecommend ? '想…' : '换一批' }}</text>
       </view>
 
-      <view class="pair">
+      <view class="pair" :class="{ many: shownItems.length > 2 }">
         <view
-          v-for="it in (currentCombo.items || []).slice(0, 2)"
+          v-for="it in shownItems"
           :key="it.item_id"
           class="polaroid"
         >
@@ -284,15 +304,7 @@ const todayLine = computed(() => {
         </view>
       </view>
 
-      <view class="match">
-        <view class="bar">
-          <view class="fill" :style="{ width: matchScore + '%' }" />
-          <view class="star-end">★</view>
-        </view>
-        <view class="match-label">匹配度 {{ matchScore }}%</view>
-      </view>
-
-      <view class="copy">{{ taotaoCopy }}</view>
+      <view class="copy">{{ currentCombo.reason }}</view>
 
       <view class="cta press-bounce" @click="useThisCombo(currentCombo)">用这套去打卡</view>
       <view class="manual-link press-bounce" @click="goCanvas">不太满意？自己动手搭一套 ›</view>
@@ -304,7 +316,9 @@ const todayLine = computed(() => {
       <view class="empty-desc">
         {{ recError
           ? '网络不稳定，点重试让桃桃再想一次。'
-          : '需要「上装 + 下装」或「连衣裙」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。' }}
+          : (occasion
+            ? `「${occasion}」场合下凑不齐一套。需要「上装 + 下装」或「连衣裙」，场合是「${occasion}」或没填场合，且季节匹配当前温度。`
+            : '需要「上装 + 下装」或「连衣裙」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。') }}
       </view>
       <view v-if="recError" class="cta ghost press-bounce" @click="fetchRecommend">重试</view>
       <view v-else class="cta ghost press-bounce" @click="goWardrobe">去衣橱补季节</view>
@@ -522,36 +536,37 @@ const todayLine = computed(() => {
   border-radius: 10rpx;
   background: #fff0f4;
 }
-.match { margin-top: 28rpx; }
-.bar {
-  height: 22rpx;
+.pair.many {
+  flex-wrap: wrap;
+  gap: 16rpx;
+}
+.pair.many .pair-img {
+  width: 130rpx;
+  height: 130rpx;
+}
+.occasions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 12rpx;
+  margin: 20rpx 0 4rpx;
+}
+.occ {
+  padding: 8rpx 26rpx;
   border-radius: 999rpx;
-  background: #ffe4ed;
-  position: relative;
-  overflow: visible;
-}
-.fill {
-  height: 100%;
-  border-radius: 999rpx;
-  background: linear-gradient(90deg, #93c5fd, #c4b5fd 55%, #ff8fb1);
-  box-shadow: inset 0 -4rpx 0 rgba(255,255,255,0.4);
-}
-.star-end {
-  position: absolute;
-  right: 8rpx;
-  top: -8rpx;
-  color: #ffd56b;
-  font-size: 28rpx;
-}
-.match-label {
-  text-align: center;
-  margin-top: 10rpx;
-  font-size: 22rpx;
+  font-size: 24rpx;
   color: #8a7f88;
-  font-weight: 600;
+  background: #fffdfb;
+  border: 2rpx dashed #f3d5dc;
+}
+.occ.on {
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(180deg, #ffb3c9 0%, #ff8fb1 72%);
+  border-color: transparent;
 }
 .copy {
-  margin-top: 16rpx;
+  margin-top: 28rpx;
   font-size: 24rpx;
   color: #382e36;
   line-height: 1.7;

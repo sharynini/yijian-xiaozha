@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）。
 
 ---
 
@@ -181,14 +181,17 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 | 方法 | 路径 | 请求字段 | 响应 `data` |
 |------|------|----------|-------------|
-| GET | `/api/recommend` | Query：`temperature` 必填（-50~60） | `{ temperature, seasons, season_label, total_candidates, count, list: [{ items, reason }] }`，最多 3 套 |
+| GET | `/api/recommend` | Query：`temperature` 必填（-50~60）；`occasion` 选填（日常/工作/运动/正式） | `{ temperature, seasons, season_label, occasion, recent_days, total_candidates, count, list: [{ items, reason }] }`，最多 3 套 |
 
 规则（`recommend/services.py`）：
 
 1. 温度映射季节：<10℃ 冬；10~25℃ 春秋；≥25℃ 夏；「全季」始终参与
 2. 仅当前用户、未删除、`status=正常` 的衣物
-3. 基础单元为「上装+下装」或「连衣裙」单穿，两类交替取用；有外套则轮流附加一件
-4. 单品按 `wear_count` 升序（累计穿着次数少的优先）；不考虑最近穿着日期、场合、鞋包配饰
+3. 指定 `occasion` 时只用该场合或**没填场合**的衣物
+4. 基础单元为「上装+下装」或「连衣裙」单穿，两类交替取用；有外套、鞋子则各轮流附加一件（包包、帽子、配饰不参与）
+5. 单品排序：近 7 天（含今天，`RECENT_DAYS`）日记快照里出现过的排后面（降权不排除），其次 `wear_count` 少的优先
+6. `reason` 说明温度、季节、场合、是否配了外套/鞋子，以及「避开了近 7 天穿过的单品」或「有单品近 7 天穿过，衣橱里暂时没有更合适的替换」
+7. 已保存的搭配方案不参与推荐
 
 ### 2.7 天气（前缀 `/api/weather`，需 JWT）
 
@@ -345,7 +348,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 |------|------|------|
 | login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 须先勾选同意《用户协议》《隐私政策》；成功后 `switchTab` 首页 |
 | register | `POST /api/auth/register` | 成功后返回登录页，不自动登录 |
-| index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend` | 天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
+| index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend`（带所选 `occasion`） | 场合选择（全部/日常/工作/运动/正式）记在本机 `sw_occasion`；推荐卡片最多显示 4 件，文案直接用后端 `reason`；天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
 | item/list | 衣物标签：`GET /api/items`（筛选+分页）、`DELETE /api/items/:id`；搭配标签：`components/OutfitList.vue` 调 `GET/PUT/DELETE /api/outfits` | 衣物卡片进 `item/add?id=`；搭配卡片弹出「今天穿这套（写 store → `diary/create`）/ 在画布中编辑（`outfit/canvas?outfit_id=`）/ 重命名 / 删除」；下拉刷新、上拉加载按当前标签分别处理 |
 | item/add | `POST /api/upload` → `POST /api/ai/cutout` → `POST /api/ai/recognize-item`；`GET/POST/PUT/DELETE /api/items` | 新增时上传后自动抠图（可用回原图或重新抠），抠完自动识别并回填合法选项；AI 调用均 silent，失败不打断手动填写 |
 | outfit/canvas | `GET /api/items`；`GET /api/outfits/:id`（编辑时）；`POST /api/outfits`（保存）；`PUT /api/outfits/:id`（更新这套） | 拖动、缩放衣物生成 `collage`；「♡ 保存」存为搭配（名字选填）；编辑已有搭配时可选「更新这套 / 另存为新搭配」；「用这套去打卡」写入 outfit store 跳 `diary/create`；推荐进入时可「换一套」 |
@@ -398,8 +401,8 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 
 ### 5.3 功能缺口（相对 `MVP规划文档.md`）
 
-- 搭配方案不参与「今日推荐」（计划在 4b 考虑）
-- 推荐：没有「近 7 天穿过降权」，不考虑场合，不含鞋包配饰
+- 搭配方案不参与「今日推荐」（4b 评估后暂不做，等实际使用再定）
+- 推荐：不含包包、帽子、配饰；「换一批」只在同一批 3 套内轮换
 - 时间轴：没有当日详情页；日记编辑只能改心情和文字（照片、日期、衣物不能改）
 - 规划中「衣物不足 2 件时入口置灰提示」未实现（画布页空时有「先往画布上放几件衣服吧」提示）
 - 日记创建未记录当天温度、天气（接口支持，前端未传）
@@ -462,4 +465,4 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 99 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 116 项通过）
