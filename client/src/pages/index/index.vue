@@ -7,6 +7,7 @@ import { ref, computed } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
 import { OCCASIONS } from '@/utils/constants'
+import { getItemCount, ensureHasItems } from '@/utils/wardrobe'
 import { useOutfitStore } from '@/store/outfit'
 import { useUserStore } from '@/store/user'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
@@ -182,10 +183,42 @@ function shuffleCombo() {
   fetchRecommend()
 }
 
+// ---------- 衣物数量（4d：衣橱为空 / 只有 1 件时给出引导） ----------
+const itemCount = ref(null)    // null 表示还没查到，不影响原有展示
+
+function refreshItemCount() {
+  getItemCount()
+    .then((n) => { itemCount.value = n })
+    .catch(() => { /* 查询失败时沿用原有提示 */ })
+}
+
+// 推荐为空时的提示：衣服太少优先提示添加，否则保留原来的季节 / 场合说明
+const emptyHint = computed(() => {
+  if (recError.value) return { title: '推荐加载失败', desc: '网络不稳定，点重试让桃桃再想一次。' }
+  if (loadingRecommend.value) return { title: '桃桃转圈想搭配中…', desc: '' }
+  if (itemCount.value === 0) {
+    return { title: '衣橱还是空的', desc: '先拍几件衣服放进衣橱，桃桃才能帮你搭配～', needAdd: true }
+  }
+  if (itemCount.value === 1) {
+    return { title: '再添加 1 件就能开始推荐啦', desc: '推荐需要「上装 + 下装」，或者一件连衣裙单穿。', needAdd: true }
+  }
+  return {
+    title: '暂时生成不了推荐',
+    desc: occasion.value
+      ? `「${occasion.value}」场合下凑不齐一套。需要「上装 + 下装」或「连衣裙」，场合是「${occasion.value}」或没填场合，且季节匹配当前温度。`
+      : '需要「上装 + 下装」或「连衣裙」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。'
+  }
+})
+
+function goAddItem() {
+  uni.navigateTo({ url: '/pages/item/add' })
+}
+
 function goRecord() {
   goCanvas()
 }
-function goCanvas() {
+async function goCanvas() {
+  if (!(await ensureHasItems())) return
   uni.navigateTo({ url: '/pages/outfit/canvas' })
 }
 function goWardrobe() {
@@ -205,6 +238,7 @@ function useThisCombo(combo) {
 let weatherLoaded = false
 onShow(async () => {
   fetchTodayStatus()
+  refreshItemCount()
   // 第一次进入先定位拿气温再推荐；之后切回首页沿用已有温度（30 分钟内有缓存）
   if (!weatherLoaded) {
     weatherLoaded = true
@@ -312,17 +346,12 @@ const todayLine = computed(() => {
 
     <view v-else class="hero-card empty-rec">
       <TaotaoSprite :mood="loadingRecommend ? 'spin' : 'closet'" :size="140" />
-      <view class="empty-title">{{ recError ? '推荐加载失败' : (loadingRecommend ? '桃桃转圈想搭配中…' : '暂时生成不了推荐') }}</view>
-      <view class="empty-desc">
-        {{ recError
-          ? '网络不稳定，点重试让桃桃再想一次。'
-          : (occasion
-            ? `「${occasion}」场合下凑不齐一套。需要「上装 + 下装」或「连衣裙」，场合是「${occasion}」或没填场合，且季节匹配当前温度。`
-            : '需要「上装 + 下装」或「连衣裙」，且季节匹配当前温度（或标成全季）。没填季节的衣服不会出现在推荐里。') }}
-      </view>
+      <view class="empty-title">{{ emptyHint.title }}</view>
+      <view v-if="emptyHint.desc" class="empty-desc">{{ emptyHint.desc }}</view>
       <view v-if="recError" class="cta ghost press-bounce" @click="fetchRecommend">重试</view>
-      <view v-else class="cta ghost press-bounce" @click="goWardrobe">去衣橱补季节</view>
-      <view class="manual-link press-bounce" @click="goCanvas">或者自己动手搭一套 ›</view>
+      <view v-else-if="emptyHint.needAdd" class="cta press-bounce" @click="goAddItem">去添加衣物</view>
+      <view v-else-if="!loadingRecommend" class="cta ghost press-bounce" @click="goWardrobe">去衣橱补季节</view>
+      <view v-if="itemCount !== 0" class="manual-link press-bounce" @click="goCanvas">或者自己动手搭一套 ›</view>
     </view>
 
     <AppTabBar current="index" />

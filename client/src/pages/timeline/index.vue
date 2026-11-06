@@ -11,6 +11,7 @@ import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
 import { get } from '@/utils/request'
 import { MOODS } from '@/utils/constants'
+import { ensureHasItems } from '@/utils/wardrobe'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
 import SafeImage from '@/components/SafeImage.vue'
@@ -175,7 +176,8 @@ function toggleStar(e, id) {
   starred.value = { ...starred.value, [id]: !starred.value[id] }
 }
 
-function goRecord() {
+async function goRecord() {
+  if (!(await ensureHasItems())) return
   uni.navigateTo({ url: '/pages/outfit/canvas' })
 }
 

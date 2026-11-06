@@ -11,6 +11,7 @@
 import { ref, computed } from 'vue'
 import { get, put, del } from '@/utils/request'
 import { useOutfitStore } from '@/store/outfit'
+import { ensureHasItems } from '@/utils/wardrobe'
 import OutfitCollage from '@/components/OutfitCollage.vue'
 import SafeImage from '@/components/SafeImage.vue'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
@@ -135,7 +136,8 @@ function remove(outfit) {
   })
 }
 
-function goCanvas() {
+async function goCanvas() {
+  if (!(await ensureHasItems())) return
   uni.navigateTo({ url: '/pages/outfit/canvas' })
 }
 </script>
