@@ -2,14 +2,19 @@
 """
 应用工厂：创建并装配 Flask 应用实例
 """
+import logging
 import os
+import sys
 import time
 
 from flask import Flask, g, request
+from sqlalchemy import text
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import config_map
 from app.extensions import db, jwt, cors, migrate
 from app.common.errors import register_error_handlers, register_jwt_handlers
+from app.common.response import success
 from app.modules.test.routes import test_bp
 from app.modules.auth.routes import auth_bp
 from app.modules.item.routes import item_bp
@@ -41,6 +46,46 @@ def _register_request_logging(app: Flask) -> None:
         return response
 
 
+def _setup_logging(app: Flask) -> None:
+    """日志统一输出到标准输出（gunicorn / systemd 会收集），级别来自 LOG_LEVEL"""
+    level = getattr(logging, app.config.get('LOG_LEVEL') or 'INFO', logging.INFO)
+    app.logger.setLevel(level)
+    if not app.debug and not app.testing:
+        handler = logging.StreamHandler(sys.stdout)
+        handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s [%(name)s] %(message)s'))
+        app.logger.handlers = [handler]
+        app.logger.propagate = False
+
+
+def _check_production_config(app: Flask) -> None:
+    """生产环境启动时检查容易漏配的项；只打警告，不阻止启动"""
+    if not app.config.get('PUBLIC_BASE_URL'):
+        app.logger.warning('生产环境未配置 PUBLIC_BASE_URL，图片地址会使用请求域名，HTTPS 反向代理下可能拼成 http://')
+    if (os.getenv('ALLOWED_ORIGINS') or '*').strip() == '*':
+        app.logger.warning('生产环境 ALLOWED_ORIGINS 仍为 *，建议改为实际前端域名（小程序请求不受影响，H5 受影响）')
+    if not app.config.get('TRUST_PROXY'):
+        app.logger.warning('生产环境未开启 TRUST_PROXY：部署在 nginx 后面时限流会把所有用户当成同一个 IP')
+    if not app.config.get('WX_APPID') or not app.config.get('WX_APPSECRET'):
+        app.logger.warning('未配置 WX_APPID / WX_APPSECRET，小程序微信登录不可用')
+
+
+def _register_health(app: Flask) -> None:
+    """GET /api/health：服务与数据库存活检查，给部署脚本 / 监控用（无需登录，不返回任何配置信息）"""
+
+    @app.get('/api/health')
+    def health():
+        try:
+            db.session.execute(text('SELECT 1'))
+            database = 'ok'
+        except Exception:
+            app.logger.exception('健康检查：数据库不可用')
+            database = 'error'
+        body = success(data={'status': 'ok' if database == 'ok' else 'degraded', 'database': database})
+        if database != 'ok':
+            body.status_code = 503
+        return body
+
+
 def create_app(config_name: str = 'default') -> Flask:
     app = Flask(__name__)
 
@@ -50,6 +95,12 @@ def create_app(config_name: str = 'default') -> Flask:
     if config_name != 'testing':
         if not app.config.get('SECRET_KEY') or not app.config.get('JWT_SECRET_KEY'):
             raise RuntimeError('SECRET_KEY 与 JWT_SECRET_KEY 必须通过环境变量（server/.env）提供，禁止使用代码内弱默认值')
+
+    _setup_logging(app)
+
+    # 在 nginx 后面时信任一层代理，request.remote_addr / scheme 才是真实值
+    if app.config.get('TRUST_PROXY'):
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
     # 2. 初始化扩展
     db.init_app(app)
@@ -91,8 +142,13 @@ def create_app(config_name: str = 'default') -> Flask:
     # upload 蓝图内部已写死完整路径（/api/upload、/uploads/<filename>），故不带 url_prefix
     app.register_blueprint(upload_bp)
 
+    _register_health(app)
+
     # 4. 注册统一异常处理 & JWT 错误回调
     register_error_handlers(app)
     register_jwt_handlers(jwt)
+
+    if config_name == 'production':
+        _check_production_config(app)
 
     return app

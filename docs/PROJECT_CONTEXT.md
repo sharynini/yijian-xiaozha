@@ -1,7 +1,7 @@
 # 项目上下文文档（PROJECT_CONTEXT）
 
 > 依据仓库实际代码通读生成（`client/`、`server/`、`schema.sql`、`server/migrations/`）。不确定处标注「待确认」。  
-> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）；时间轴详情页，日记记录当天温度与天气；时间轴按月分段与按日期筛选；衣物不足提示。
+> 首版：2026-10-23。2026-11-05：同步 10-25 之后的天气、AI 识别、抠图、手动搭配画布、拼贴日记、数据库迁移等改动；同日加入微信一键登录（`/api/auth/wx-login`、`user.openid`），以及隐私合规：注销账号、隐私授权弹窗、用户协议与隐私政策页；搭配方案（保存、列表、编辑、删除，衣橱页「搭配」标签），删除旧的 `outfit/select` 页；推荐升级（近 7 天降权、场合、配鞋、真实推荐理由）；时间轴详情页，日记记录当天温度与天气；时间轴按月分段与按日期筛选；衣物不足提示。2026-11-06：部署准备（gunicorn、限流、上传图片校验与去 EXIF、健康检查、`deploy/` 部署文件）。
 
 ---
 
@@ -22,7 +22,8 @@
 
 开发端口：
 
-- 后端：`server/run.py` → `0.0.0.0:5001`（Flask 自带开发服务器）
+- 后端：`server/run.py` → `0.0.0.0:5001`（Flask 自带开发服务器，仅本机开发）
+- 生产：`server/wsgi.py` + `gunicorn.conf.py`（1 进程 × 8 线程，监听 127.0.0.1:5001），前面是 nginx；部署步骤见 `deploy/README.md`
 - 前端 H5：`client/vite.config.js` → `8081`
 
 ### 1.2 仓库目录结构（实际存在）
@@ -46,7 +47,8 @@ secret/
 │       └── composables/         # useRequest.js
 └── server/                      # Flask 后端
     ├── .env.example             # 环境变量模板（无值）；真实值在 server/.env（已 gitignore）
-    ├── requirements.txt / config.py / run.py / pytest.ini
+    ├── requirements.txt / requirements.lock.txt（pip freeze 锁定全部版本，生产用）
+    ├── config.py / run.py（开发入口）/ wsgi.py + gunicorn.conf.py（生产入口）/ pytest.ini
     ├── migrations/              # Flask-Migrate / Alembic
     ├── scripts/                 # cleanup_orphan_outfits.py、migrate_image_urls.py（一次性运维脚本）
     ├── sql/                     # 历史手工 SQL
@@ -80,6 +82,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | 5xxx | 推荐 | 5002 temperature 缺失 / 非数字 / 超范围 |
 | 6xxx | 上传 | 6001 未选文件 / 格式不支持 |
 | 7xxx | 天气 | 7001 未配置；7002 经纬度错误；7003 天气服务不可用 |
+| 429 | 限流 | 登录 / 注册 / 微信登录（按 IP）、上传（按用户）超出频率，HTTP 状态码也是 429 |
 | 8xxx | AI | 8001 识别未配置；8002 图片无效（非本人/非本站/不存在）；8003 识别失败；8004 太频繁；8005 抠图组件未安装；8006 没抠出衣物；8007 抠图失败 |
 
 ### 2.1 测试与调试台（仅 DEBUG 模式注册，生产不暴露）
@@ -89,6 +92,8 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | GET | `/api/v1/test/ping` | 否 | `{ "message": "pong" }` |
 | GET | `/api/v1/test/db` | 否 | 数据库连通性 |
 | GET | `/` | 否 | 内嵌 HTML 接口调试台（`home/routes.py`） |
+
+健康检查（所有环境都注册）：`GET /api/health`，无需登录，`data: { status, database }`；数据库不通时 HTTP 503、`database: "error"`，不返回任何配置信息。
 
 ### 2.2 认证（前缀 `/api/auth`）
 
@@ -223,7 +228,8 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | GET | `/uploads/<filename>` | 否 | — | 直接返回图片文件 |
 
 - 文件名 `<user_id>_<uuid>.<ext>`；单请求上限 5MB（`MAX_CONTENT_LENGTH`）
-- 只按扩展名判断格式，不校验文件内容
+- 处理流程（`upload/routes.py`）：每用户每小时 `UPLOAD_RATE_LIMIT_PER_HOUR`（60）张 → 用 Pillow 校验必须是真实的 JPEG/PNG/WEBP/GIF（扩展名按实际格式决定）→ 按 EXIF 方向转正并**去掉全部元数据**（含 GPS）→ 最长边超过 `UPLOAD_MAX_SIDE`（2048）等比缩小；GIF 只校验不改写；像素超过 4000 万拒绝
+- 生产环境 `/uploads/` 由 nginx 直接提供，只允许单层文件名 + 图片后缀
 - 图片地址约定（`common/media.py`）：库里只存相对路径 `/uploads/xxx`；返回时优先用 `PUBLIC_BASE_URL` 拼接，未配置则用当前请求域名
 
 ### 2.10 接口前缀约定
@@ -391,16 +397,16 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | 微信登录联调 | 代码已完成（静默登录、不强制跳登录页），需注册小程序后在 `server/.env` 配置 `WX_APPID` / `WX_APPSECRET`，并在 `manifest.json` 填 appid 后真机验证 |
 | 隐私合规 | 代码已完成；协议与政策中的【待填写】（运营者名称、联系邮箱、云服务商及地域、备份保留天数）需补全；小程序后台「用户隐私保护指引」需按隐私政策填写 |
 | 内容安全 | 日记文字、上传图片没有接入内容安全检测（是否必须：待确认） |
-| 生产部署 | 只有 Flask 开发服务器（`run.py`），无 WSGI 服务器、反向代理、HTTPS 配置；`ProductionConfig` 仅设 `DEBUG=False` |
+| 生产部署 | 代码与配置模板已就绪（`wsgi.py`、`gunicorn.conf.py`、`deploy/`）；需要服务器、已备案域名和证书后按 `deploy/README.md` 操作；nginx 配置未在真实服务器上 `nginx -t` 验证过 |
 | 域名与 AppID | `client/.env.production` 中 `VITE_API_BASE` 为占位地址 `https://api.example.com`；`manifest.json` 的 `appid` 为空 |
 
 ### 5.2 安全与运维
 
 - `/uploads/<filename>` 无需鉴权即可访问，靠 uuid 文件名防猜测；日记现场照等私人图片也走这里
-- 上传只按扩展名判断格式，不校验图片内容；服务端不做压缩
-- 登录、注册没有频率限制；AI 频率限制和天气缓存都是进程内存，多进程或重启后失效
-- 没有数据库与上传目录的备份方案
-- rembg 首次加载模型较慢、内存占用较大，服务器配置需评估（待确认具体占用）
+- 限流（`common/ratelimit.py`：登录 10 次/分钟、注册 10 次/小时、微信登录 20 次/分钟按 IP；上传 60 张/小时按用户）、AI 限流和天气缓存都在进程内存里：gunicorn 固定单进程以保证计数准确，进程重启后清零；扩容多进程前需换成 Redis 等共享存储
+- 限流按 IP 依赖 `TRUST_PROXY=1` + nginx 覆盖 `X-Forwarded-For`；本机直连时不要开
+- 备份：`deploy/backup.sh` 每日 mysqldump + 打包 uploads，保留 14 天；与数据同机，需定期下载或同步到对象存储
+- rembg 首次加载模型较慢、内存占用较大，服务器建议 2 核 4G 起（待确认具体占用）；生产模型目录由 `U2NET_HOME` 指定
 - `ALLOWED_ORIGINS` 默认 `*`，生产需收紧（小程序请求不受 CORS 影响，H5 受影响）
 
 ### 5.3 功能缺口（相对 `MVP规划文档.md`）
@@ -452,7 +458,12 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | `DASHSCOPE_API_KEY` | 否 | 阿里云百炼；不填则不做 AI 识别 |
 | `DASHSCOPE_BASE_URL`、`QWEN_VL_MODEL` | 否 | 一般留空用默认 |
 | `REMBG_MODEL`、`CUTOUT_MAX_SIDE`、`CUTOUT_POST_PROCESS` | 否 | 抠图模型、缩放边长、掩码后处理开关 |
-| `FLASK_CONFIG` | 否 | `run.py` 读取，`development`（默认）/ `production` |
+| `FLASK_CONFIG` | 否 | `run.py` 默认 `development`；`wsgi.py` 默认 `production` |
+| `LOG_LEVEL` | 否 | 日志级别，默认 INFO；生产环境输出到标准输出（journalctl 查看） |
+| `TRUST_PROXY` | 生产必填 | 在 nginx 后面时填 `1`，限流才能拿到真实 IP；本机直连不要开 |
+| `GUNICORN_BIND` / `GUNICORN_WORKERS` / `GUNICORN_THREADS` | 否 | 覆盖 `gunicorn.conf.py` 默认值（127.0.0.1:5001 / 1 / 8） |
+
+生产环境启动时（`_check_production_config`）若 `PUBLIC_BASE_URL` 未填、`ALLOWED_ORIGINS` 为 `*`、未开 `TRUST_PROXY`、未配微信登录，会在日志里打警告（不阻止启动）。
 
 `run.py` 先 `load_dotenv(server/.env, override=True)` 再导入 app。
 
@@ -469,4 +480,6 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-05 共 125 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-06 共 143 项通过）
+5. 本机试跑生产模式：`cd server && GUNICORN_BIND=127.0.0.1:5002 venv/bin/gunicorn -c gunicorn.conf.py wsgi:app`
+6. 上线部署：见 `deploy/README.md`

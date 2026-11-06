@@ -1,0 +1,85 @@
+# 智能衣橱 nginx 站点配置模板
+#
+# 用法（在服务器上）：
+#   1. 把文件里的 api.example.com 全部换成你已备案的接口域名
+#   2. sudo cp deploy/nginx.conf.example /etc/nginx/sites-available/smart-wardrobe
+#      sudo ln -s /etc/nginx/sites-available/smart-wardrobe /etc/nginx/sites-enabled/
+#   3. 先只启用下面的 80 端口 server 块，用 certbot 申请证书（见 deploy/README.md 第 7 步），
+#      certbot 会自动填好证书路径；或者手动把 ssl_certificate 两行改成你的证书文件路径
+#   4. sudo nginx -t && sudo systemctl reload nginx
+#
+# 路径约定：项目放在 /srv/smart-wardrobe，上传目录为 /srv/smart-wardrobe/server/uploads
+# （若 server/.env 里改了 UPLOAD_FOLDER，这里的 alias 也要同步改）
+
+# HTTP：只用于证书验证和跳转到 HTTPS
+server {
+    listen 80;
+    listen [::]:80;
+    server_name api.example.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name api.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+
+    # 安全响应头
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options nosniff always;
+    add_header Referrer-Policy strict-origin-when-cross-origin always;
+
+    # 后端单张图片上限 5MB（config.py 的 MAX_CONTENT_LENGTH），这里留一点余量
+    client_max_body_size 6m;
+
+    access_log /var/log/nginx/smart-wardrobe.access.log;
+    error_log  /var/log/nginx/smart-wardrobe.error.log;
+
+    # 上传的图片：nginx 直接读文件，不经过 Python
+    # 只匹配「/uploads/单个文件名.图片后缀」，不允许子目录和其它后缀（正则 location 优先于下面的前缀 location）
+    location ~* ^/uploads/([A-Za-z0-9_]+\.(?:jpg|jpeg|png|webp|gif))$ {
+        alias /srv/smart-wardrobe/server/uploads/$1;
+        expires 30d;
+        add_header Cache-Control "public, max-age=2592000, immutable";
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location /uploads/ {
+        return 404;
+    }
+
+    # 业务接口：转发给 gunicorn（只监听本机 5001）
+    location /api/ {
+        proxy_pass http://127.0.0.1:5001;
+        proxy_http_version 1.1;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        # 用 $remote_addr 覆盖而不是追加，客户端伪造的 X-Forwarded-For 不会传进来
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host  $host;
+        # 抠图可能比较慢，与 gunicorn.conf.py 的 timeout 保持一致
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    # 其它路径（含调试台 /）一律 404
+    location / {
+        return 404;
+    }
+
+    # 可选：如果也要上线 H5 网页版，把 client 打包产物（npm run build:h5 → client/dist/build/h5）
+    # 放到服务器上，用另一个域名单独配一个 server 块，不要和接口域名混在一起。
+}

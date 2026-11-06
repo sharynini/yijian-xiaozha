@@ -67,6 +67,18 @@ class Config:
     # 抠图掩码后处理（抹平毛边，但会填掉腋下等窄缝隙），默认关闭；填 1 / true 打开
     CUTOUT_POST_PROCESS = (os.getenv('CUTOUT_POST_PROCESS') or '').strip().lower() in ('1', 'true', 'yes')
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
+    # 上传图片：最长边超过该值会等比缩小；每用户每小时上传张数上限
+    UPLOAD_MAX_SIDE = 2048
+    UPLOAD_RATE_LIMIT_PER_HOUR = 60
+
+    # 登录 / 注册 / 上传限流（app/common/ratelimit.py）；测试环境关闭
+    RATELIMIT_ENABLED = True
+
+    # 部署在 nginx 等反向代理后面时设为 1：信任一层代理传来的 X-Forwarded-For / Proto，
+    # 否则限流拿到的都是 127.0.0.1。直接对外暴露 Flask 时不要开启（客户端可伪造该请求头）
+    TRUST_PROXY = (os.getenv('TRUST_PROXY') or '').strip().lower() in ('1', 'true', 'yes')
+    # 日志级别：DEBUG / INFO / WARNING / ERROR
+    LOG_LEVEL = (os.getenv('LOG_LEVEL') or 'INFO').strip().upper()
 
     JWT_SECRET_KEY = os.getenv('JWT_SECRET_KEY')
     JWT_ACCESS_TOKEN_EXPIRES = int(os.getenv('JWT_ACCESS_TOKEN_EXPIRES', 60 * 60 * 24 * 7))
@@ -81,7 +93,7 @@ class DevelopmentConfig(Config):
 
 
 class ProductionConfig(Config):
-    """生产环境（预留）"""
+    """生产环境：关闭调试；启动时检查关键配置（见 app/__init__.py 的 _check_production_config）"""
     DEBUG = False
 
 
@@ -89,6 +101,8 @@ class TestingConfig(Config):
     """pytest 使用内存 SQLite，不连业务库"""
     TESTING = True
     DEBUG = True
+    RATELIMIT_ENABLED = False   # 限流测试里单独打开
+    TRUST_PROXY = False
     SECRET_KEY = 'pytest-only-secret'
     PUBLIC_BASE_URL = ''  # 测试固定用请求域名，不受本机环境变量影响
     JWT_SECRET_KEY = 'pytest-only-jwt-secret'

@@ -6,10 +6,16 @@
 from flask import Blueprint, request
 from flask_jwt_extended import jwt_required, get_jwt_identity
 
+from app.common.ratelimit import RateLimiter, client_ip
 from app.common.response import success, error
 from app.modules.auth.services import AuthService
 
 auth_bp = Blueprint('auth', __name__)
+
+# 按 IP 限流，防暴力猜密码 / 批量注册（超出返回 HTTP 429，业务码 429）
+LOGIN_LIMIT = RateLimiter('auth_login', limit=10, window_seconds=60)
+REGISTER_LIMIT = RateLimiter('auth_register', limit=10, window_seconds=3600)
+WX_LOGIN_LIMIT = RateLimiter('auth_wx_login', limit=20, window_seconds=60)
 
 
 @auth_bp.post('/register')
@@ -19,6 +25,7 @@ def register():
     POST /api/auth/register
     Body: { "username": "xxx", "email": "xxx@xx.com", "password": "123456" }
     """
+    REGISTER_LIMIT.check(client_ip(), '注册太频繁了，请稍后再试')
     data = request.get_json(silent=True) or {}
 
     username = data.get('username', '').strip()
@@ -37,6 +44,7 @@ def login():
     POST /api/auth/login
     Body: { "account": "xxx", "password": "123456" }
     """
+    LOGIN_LIMIT.check(client_ip(), '登录尝试太频繁了，请 1 分钟后再试')
     data = request.get_json(silent=True) or {}
 
     account = data.get('account', '').strip()
@@ -58,6 +66,7 @@ def wx_login():
     Body: { "code": "wx.login 返回的 code" }
     返回: { access_token, user, is_new }
     """
+    WX_LOGIN_LIMIT.check(client_ip(), '登录太频繁了，请稍后再试')
     data = request.get_json(silent=True) or {}
 
     user, access_token, is_new = AuthService.wx_login(code=data.get('code'))

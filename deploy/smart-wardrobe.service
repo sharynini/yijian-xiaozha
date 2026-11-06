@@ -1,0 +1,40 @@
+# systemd 服务：开机自启、崩溃自动重启、日志进 journalctl
+#
+# 安装（在服务器上）：
+#   sudo cp deploy/smart-wardrobe.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now smart-wardrobe
+# 查看状态 / 日志：
+#   sudo systemctl status smart-wardrobe
+#   sudo journalctl -u smart-wardrobe -f
+#
+# 约定：项目在 /srv/smart-wardrobe，用专门的系统用户 wardrobe 运行（不用 root）。
+# 密钥都在 /srv/smart-wardrobe/server/.env，由 wsgi.py 加载，这里不写任何密钥。
+
+[Unit]
+Description=Smart Wardrobe API (gunicorn)
+After=network.target mysql.service
+Wants=mysql.service
+
+[Service]
+Type=simple
+User=wardrobe
+Group=wardrobe
+WorkingDirectory=/srv/smart-wardrobe/server
+Environment=FLASK_CONFIG=production
+# rembg 模型下载 / 缓存目录（首次抠图时自动下载）
+Environment=U2NET_HOME=/srv/smart-wardrobe/.rembg
+ExecStart=/srv/smart-wardrobe/server/venv/bin/gunicorn -c gunicorn.conf.py wsgi:app
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+
+# 基础加固：只读系统目录，只允许写上传目录和模型目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/srv/smart-wardrobe/server/uploads /srv/smart-wardrobe/.rembg
+
+[Install]
+WantedBy=multi-user.target

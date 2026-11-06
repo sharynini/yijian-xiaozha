@@ -92,10 +92,14 @@ def test_wear_log_snapshot_and_photo_relative(client, auth_header, user):
 
 # ---------------- 上传 ----------------
 def test_upload_returns_url_and_path(app, client, auth_header, tmp_path):
+    from PIL import Image
     app.config['UPLOAD_FOLDER'] = str(tmp_path)
+    buf = io.BytesIO()
+    Image.new('RGB', (8, 8), 'white').save(buf, 'JPEG')   # 上传接口会校验是否为真实图片
+    buf.seek(0)
     resp = client.post(
         '/api/upload',
-        data={'file': (io.BytesIO(b'fake-image'), 'a.jpg')},
+        data={'file': (buf, 'a.jpg')},
         headers=auth_header,
         content_type='multipart/form-data',
     )
