@@ -29,6 +29,17 @@ export default {
 </script>
 
 <style>
+/* #ifdef H5 */
+/*
+ * pages.json 的 tabBar.custom 只在微信小程序里生效；H5 仍会画 uni-app 自带的文字底栏，
+ * 盖住各页面里的 AppTabBar（手绘图标那条）。这里在 H5 隐藏自带底栏，只保留 AppTabBar。
+ */
+uni-tabbar,
+.uni-tabbar-bottom {
+  display: none !important;
+}
+/* #endif */
+
 page {
   background-color: #fff8f5;
   background-image: repeating-linear-gradient(

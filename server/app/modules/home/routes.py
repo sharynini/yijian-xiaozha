@@ -13,7 +13,7 @@ PAGE = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>智能衣橱 · 接口调试台</title>
+<title>衣笺小札 · 接口调试台</title>
 <style>
   * { box-sizing: border-box; }
   body { margin: 0; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -51,7 +51,7 @@ PAGE = """<!DOCTYPE html>
 </head>
 <body>
 <header>
-  <h1>智能衣橱 · 后端接口调试台</h1>
+  <h1>衣笺小札 · 后端接口调试台</h1>
   <p>直接在浏览器中调用后端接口 —— 注册 / 登录 / 衣物管理（开发调试用）</p>
 </header>
 

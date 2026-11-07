@@ -1,7 +1,7 @@
 {
-  "name": "智能衣橱",
+  "name": "衣笺小札",
   "appid": "",
-  "description": "智能衣橱 + 轻量穿搭日记",
+  "description": "衣笺小札：私人衣橱与穿搭手帐",
   "versionName": "1.0.0",
   "versionCode": "100",
   "transformPx": false,
@@ -47,7 +47,7 @@
     "usingComponents": true
   },
   "h5": {
-    "title": "智能衣橱",
+    "title": "衣笺小札",
     "router": {
       "mode": "hash"
     }

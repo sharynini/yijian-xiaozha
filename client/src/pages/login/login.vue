@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { useUserStore } from '@/store/user'
+import TaotaoSprite from '@/components/TaotaoSprite.vue'
 
 const userStore = useUserStore()
 
@@ -88,8 +89,11 @@ function goRegister() {
 <template>
   <view class="container">
     <view class="header">
-      <view class="logo">衣</view>
-      <view class="title">智能衣橱</view>
+      <!-- 桃桃挥手：组件自带上下浮动，外层圆框再加左右轻摆 -->
+      <view class="logo">
+        <TaotaoSprite mood="wave" :size="320" />
+      </view>
+      <view class="title">衣笺小札</view>
       <view class="subtitle">管理你的衣物，记录每天的穿搭</view>
     </view>
 
@@ -139,16 +143,22 @@ function goRegister() {
   padding: 60rpx 0 40rpx;
 }
 .logo {
-  width: 120rpx;
-  height: 120rpx;
-  line-height: 120rpx;
+  width: 220rpx;
+  height: 220rpx;
   margin: 0 auto 24rpx;
-  border-radius: 32rpx;
-  background: linear-gradient(135deg, #8fb3d9, #5b8def);
-  color: #fff;
-  font-size: 52rpx;
-  font-weight: 600;
-  text-align: center;
+  border-radius: 50%;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fdf5e8;            /* 与桃桃插画的底色一致，看不出图片边界 */
+  border: 6rpx solid #ffc9d9;
+  box-shadow: 0 12rpx 32rpx rgba(255, 143, 177, 0.25);
+  animation: sway 3.2s ease-in-out infinite;
+}
+@keyframes sway {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: rotate(4deg); }
 }
 .title {
   font-size: 40rpx;

@@ -127,7 +127,7 @@
   },
   "globalStyle": {
     "navigationBarTextStyle": "black",
-    "navigationBarTitleText": "智能衣橱",
+    "navigationBarTitleText": "衣笺小札",
     "navigationBarBackgroundColor": "#FFF8F5",
     "backgroundColor": "#FFF8F5"
   }
