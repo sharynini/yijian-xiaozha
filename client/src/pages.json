@@ -84,6 +84,15 @@
       }
     },
     {
+      "path": "pages/mine/avatar-crop",
+      "style": {
+        "navigationBarTitleText": "裁剪头像",
+        "navigationBarBackgroundColor": "#2B2427",
+        "navigationBarTextStyle": "white",
+        "backgroundColor": "#2B2427"
+      }
+    },
+    {
       "path": "pages/login/login",
       "style": {
         "navigationBarTitleText": "登录"

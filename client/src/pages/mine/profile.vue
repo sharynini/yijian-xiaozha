@@ -8,7 +8,8 @@
  *   - <input type="nickname">：键盘上方提示「使用微信昵称」；微信会对昵称做安全检测，
  *     选用微信昵称时 v-model 不一定更新，所以在 blur / change 里再取一次值
  * H5：普通选图 + 普通输入框
- * 头像先走 POST /api/upload，再把返回的地址交给 PUT /api/auth/profile
+ * 选图后先进裁剪页（pages/mine/avatar-crop）框选区域，裁好的 512×512 图再走 POST /api/upload，
+ * 最后把返回的地址交给 PUT /api/auth/profile
  * 这两个都是隐私接口，页面里放了 PrivacyPopup
  */
 import { ref, computed } from 'vue'
@@ -56,9 +57,26 @@ async function useAvatar(localPath) {
   }
 }
 
+// 选好的图先去裁剪页框选区域，裁好后再上传；裁剪页点「重新选择」时，H5 直接重新打开选图
+function openCrop(localPath) {
+  if (!localPath) return
+  uni.navigateTo({
+    url: '/pages/mine/avatar-crop',
+    events: {
+      cropped: (path) => useAvatar(path),
+      rechoose: () => {
+        // #ifndef MP-WEIXIN
+        setTimeout(pickAvatarH5, 400)
+        // #endif
+      }
+    },
+    success: (res) => res.eventChannel.emit('init', { src: localPath })
+  })
+}
+
 // 小程序：官方头像选择按钮的回调
 function onChooseAvatar(e) {
-  useAvatar(e && e.detail && e.detail.avatarUrl)
+  openCrop(e && e.detail && e.detail.avatarUrl)
 }
 
 // H5：普通选图
@@ -66,7 +84,7 @@ function pickAvatarH5() {
   uni.chooseImage({
     count: 1,
     sizeType: ['compressed'],
-    success: (res) => useAvatar(res.tempFilePaths && res.tempFilePaths[0])
+    success: (res) => openCrop(res.tempFilePaths && res.tempFilePaths[0])
   })
 }
 

@@ -344,6 +344,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | pages/diary/edit | 编辑日记 | 否 | |
 | pages/mine/index | 我的小窝 | 我的 | 自定义导航栏；头像卡片点击进编辑资料 |
 | pages/mine/profile | 编辑资料 | 否 | `?first=1` 为新用户引导（可跳过，保存后回首页） |
+| pages/mine/avatar-crop | 裁剪头像 | 否 | 由编辑资料页 `navigateTo` + 事件通道传入 `{ src }`，裁好后 `emit('cropped', 路径)` |
 | pages/login/login | 登录 | 否 | |
 | pages/register/register | 注册 | 否 | |
 | pages/legal/agreement | 用户协议 | 否 | 静态文本，含【待填写】占位 |
@@ -368,7 +369,8 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | timeline/detail | `GET /api/wear-logs/:id`；逐件静默 `GET /api/items/:id`（检查是否已删除）；`DELETE /api/wear-logs/:id` | 展示日期、天气温度、拼贴图（无则缩略图）、心情、一句话、现场照（可预览）、衣物清单（在衣橱的可点进编辑，已删的标注）；底部「删除这条记录 / 编辑心情和日记」；从编辑页返回时重新加载 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
 | mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存；头像卡片进 `mine/profile`，未设头像时显示「完善头像和昵称」 |
-| mine/profile | `POST /api/upload`（头像）；`PUT /api/auth/profile` | 小程序用 `open-type="chooseAvatar"` 按钮与 `type="nickname"` 输入框（微信头像昵称填写能力），H5 用普通选图和输入框；挂 `PrivacyPopup` |
+| mine/profile | `POST /api/upload`（头像）；`PUT /api/auth/profile` | 小程序用 `open-type="chooseAvatar"` 按钮与 `type="nickname"` 输入框（微信头像昵称填写能力），H5 用普通选图和输入框；挂 `PrivacyPopup`；选图后先进 `mine/avatar-crop` 框选区域，裁成 512×512 JPG 再上传 |
+| mine/avatar-crop | 无（本地处理） | 圆形取景框（框外压暗）；`movable-view` 拖动，滑杆缩放 1–4 倍（改图片显示尺寸，保持取景中心）；`canvas` 按框内区域对应的原图矩形 `drawImage` 后 `canvasToTempFilePath`；H5 的 base64 结果转成 blob 地址再上传；取景框边长在页面加载时测量，读到 0 时退回 280px |
 
 前端未调用的后端能力：测试接口、调试台。
 
