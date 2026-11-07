@@ -76,6 +76,14 @@
       }
     },
     {
+      "path": "pages/mine/profile",
+      "style": {
+        "navigationBarTitleText": "编辑资料",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
+      }
+    },
+    {
       "path": "pages/login/login",
       "style": {
         "navigationBarTitleText": "登录"

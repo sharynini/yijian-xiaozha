@@ -105,6 +105,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | POST | `/api/auth/login` | 否 | Body：`account`（用户名或邮箱）、`password` | `{ "access_token", "user" }` |
 | POST | `/api/auth/wx-login` | 否 | Body：`code`（小程序 `wx.login` 返回） | `{ "access_token", "user", "is_new" }` |
 | GET | `/api/auth/profile` | 是 | 无 | `User.to_dict()` |
+| PUT | `/api/auth/profile` | 是 | Body：`nickname`（去空格后 1–20 字）、`avatar`（只能是本人上传到本站的图片：`/uploads/<本人 user_id>_xxx.<图片后缀>` 且文件存在），出现哪个改哪个；错误 1004 | `User.to_dict()` |
 | DELETE | `/api/auth/account` | 是 | 无 | `{ deleted_files }`；`msg`「账号已注销」 |
 
 注销账号（`AuthService.delete_account`）：
@@ -122,7 +123,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 - 微信账号没有密码，不能走账号密码登录（`check_password` 对空哈希恒为 False）；暂不支持把已有账号密码用户与微信绑定
 - `User.to_dict()` 不返回 openid
 
-无修改资料/密码、绑定微信接口。
+无修改密码、找回密码、绑定微信、手机号接口：小程序只用微信登录（没有密码），个人主体也用不了手机号能力；账号密码登录只在 H5 保留用于开发测试。
 
 ### 2.3 衣物（前缀 `/api/items`，均需 JWT）
 
@@ -341,7 +342,8 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
 | pages/timeline/detail | 日记详情 | 否 | `?log_id=`；时间轴点卡片进入 |
 | pages/diary/edit | 编辑日记 | 否 | |
-| pages/mine/index | 我的小窝 | 我的 | 自定义导航栏 |
+| pages/mine/index | 我的小窝 | 我的 | 自定义导航栏；头像卡片点击进编辑资料 |
+| pages/mine/profile | 编辑资料 | 否 | `?first=1` 为新用户引导（可跳过，保存后回首页） |
 | pages/login/login | 登录 | 否 | |
 | pages/register/register | 注册 | 否 | |
 | pages/legal/agreement | 用户协议 | 否 | 静态文本，含【待填写】占位 |
@@ -355,7 +357,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 
 | 页面 | 接口 | 说明 |
 |------|------|------|
-| login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），可展开账号密码表单；H5：`POST /api/auth/login` | 须先勾选同意《用户协议》《隐私政策》；成功后 `switchTab` 首页 |
+| login | 小程序：`POST /api/auth/wx-login`（「微信一键登录」按钮），（小程序不提供账号密码入口）；新用户（`is_new`）登录后跳 `mine/profile?first=1`；H5：`POST /api/auth/login` | 须先勾选同意《用户协议》《隐私政策》；成功后 `switchTab` 首页 |
 | register | `POST /api/auth/register` | 成功后返回登录页，不自动登录 |
 | index | `GET /api/wear-logs?page=1&per_page=1`；`uni.getLocation` → `GET /api/weather`；`GET /api/recommend`（带所选 `occasion`） | 场合选择（全部/日常/工作/运动/正式）记在本机 `sw_occasion`；推荐卡片最多显示 4 件，文案直接用后端 `reason`；天气结果本地缓存 30 分钟（key `sw_weather`）；定位失败或 7001 时改为手动调温度；推荐结果写入 outfit store；「用这套」跳 `outfit/canvas?from=recommend`，「自己搭」跳 `outfit/canvas` |
 | item/list | 衣物标签：`GET /api/items`（筛选+分页）、`DELETE /api/items/:id`；搭配标签：`components/OutfitList.vue` 调 `GET/PUT/DELETE /api/outfits` | 衣物卡片进 `item/add?id=`；搭配卡片弹出「今天穿这套（写 store → `diary/create`）/ 在画布中编辑（`outfit/canvas?outfit_id=`）/ 重命名 / 删除」；下拉刷新、上拉加载按当前标签分别处理 |
@@ -365,7 +367,8 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | timeline | `GET /api/wear-logs`（筛选时带 `date`） | 按「月份分段标题 → 日（N日 周X，今天/昨天）→ 小卡」三层展示，最新在前；标题左侧「📅 选日期」（`picker mode="date"`，最晚今天）筛选某一天，显示「只看 M月D日 ✕」标签，点 ✕ 恢复；筛选无结果时显示「看全部 / 去记录」；切换筛选只采用最后一次请求结果；有 `collage` 时用 `OutfitCollage` 还原拼贴；点卡片进 `timeline/detail?log_id=`；卡片上「💬」直接进 `diary/edit`；「⭐」只存在页面内存，刷新即丢失；`onShow` 时刷新列表 |
 | timeline/detail | `GET /api/wear-logs/:id`；逐件静默 `GET /api/items/:id`（检查是否已删除）；`DELETE /api/wear-logs/:id` | 展示日期、天气温度、拼贴图（无则缩略图）、心情、一句话、现场照（可预览）、衣物清单（在衣橱的可点进编辑，已删的标注）；底部「删除这条记录 / 编辑心情和日记」；从编辑页返回时重新加载 |
 | diary/edit | `GET /api/wear-logs/:id`；`PUT /api/wear-logs/:id` | 仅改 mood、content |
-| mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存 |
+| mine | `GET /api/auth/profile`；`GET /api/items` 与 `GET /api/wear-logs`（取 total）；`DELETE /api/auth/account` | 退出只清本地状态；底部有用户协议、隐私政策、注销账号入口；注销需两次确认并输入「注销」，成功后清空本机全部缓存；头像卡片进 `mine/profile`，未设头像时显示「完善头像和昵称」 |
+| mine/profile | `POST /api/upload`（头像）；`PUT /api/auth/profile` | 小程序用 `open-type="chooseAvatar"` 按钮与 `type="nickname"` 输入框（微信头像昵称填写能力），H5 用普通选图和输入框；挂 `PrivacyPopup` |
 
 前端未调用的后端能力：测试接口、调试台。
 

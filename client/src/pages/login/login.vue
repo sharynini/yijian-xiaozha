@@ -35,7 +35,7 @@ onShow(() => {
 function openLegal(name) {
   uni.navigateTo({ url: `/pages/legal/${name}` })
 }
-// 小程序端默认只显示「微信一键登录」，点「使用账号密码登录」再展开表单；H5 只有账号密码
+// 小程序端只用「微信一键登录」；账号密码登录只在 H5 保留（开发测试用）
 const showPasswordForm = ref(true)
 // #ifdef MP-WEIXIN
 showPasswordForm.value = false
@@ -52,8 +52,13 @@ async function handleWxLogin() {
   if (loading.value || !ensureAgreed()) return
   loading.value = true
   try {
-    await userStore.wxLogin()
-    goHome()
+    const { isNew } = await userStore.wxLogin()
+    if (isNew) {
+      // 新用户：先去设置头像和昵称（可跳过）
+      uni.redirectTo({ url: '/pages/mine/profile?first=1' })
+    } else {
+      goHome()
+    }
   } catch (e) {
     uni.showToast({ title: (e && e.msg) || '微信登录失败，请稍后再试', icon: 'none' })
   } finally {
@@ -102,9 +107,6 @@ function goRegister() {
       <button class="btn-primary" :disabled="loading" @click="handleWxLogin">
         {{ loading ? '登录中...' : '微信一键登录' }}
       </button>
-      <view v-if="!showPasswordForm" class="footer">
-        <text class="link" @click="showPasswordForm = true">使用账号密码登录</text>
-      </view>
     </view>
     <!-- #endif -->
 

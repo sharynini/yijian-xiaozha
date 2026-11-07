@@ -3,7 +3,7 @@
  * 维护 token 与用户信息，并同步到本地缓存
  */
 import { defineStore } from 'pinia'
-import { post, get, del, wxSilentLogin } from '@/utils/request'
+import { post, get, put, del, wxSilentLogin } from '@/utils/request'
 import { TOKEN_KEY, USER_KEY, MANUAL_LOGOUT_KEY } from '@/utils/config'
 
 export const useUserStore = defineStore('user', {
@@ -14,7 +14,9 @@ export const useUserStore = defineStore('user', {
 
   getters: {
     isLogin: (state) => !!state.token,
-    nickname: (state) => (state.userInfo && state.userInfo.nickname) || '未登录'
+    nickname: (state) => (state.userInfo && state.userInfo.nickname) || '未登录',
+    /** 还没设置过头像：「我的」页提示去完善资料 */
+    needsProfile: (state) => !!state.userInfo && !state.userInfo.avatar
   },
 
   actions: {
@@ -31,13 +33,14 @@ export const useUserStore = defineStore('user', {
 
     /**
      * 微信一键登录（小程序端，用户主动点击；首次登录会自动创建账号）
+     * @returns {Promise<{user, isNew}>} isNew 为 true 时登录页引导去设置头像昵称
      */
     async wxLogin() {
       uni.showLoading({ title: '登录中...', mask: true })
       try {
         const data = await wxSilentLogin({ manual: true })
         this.setAuth(data.access_token, data.user)
-        return data.user
+        return { user: data.user, isNew: !!data.is_new }
       } finally {
         uni.hideLoading()
       }
@@ -57,6 +60,17 @@ export const useUserStore = defineStore('user', {
      */
     async register(username, email, password) {
       return post('/api/auth/register', { username, email, password }, { loading: true, loadingText: '注册中...', auth: false })
+    },
+
+    /**
+     * 修改头像 / 昵称（PUT /api/auth/profile），成功后同步本地用户信息
+     * @param {{nickname?: string, avatar?: string}} payload 只传要改的字段
+     */
+    async updateProfile(payload) {
+      const user = await put('/api/auth/profile', payload, { loading: true, loadingText: '保存中...' })
+      this.userInfo = user
+      uni.setStorageSync(USER_KEY, user)
+      return user
     },
 
     /**

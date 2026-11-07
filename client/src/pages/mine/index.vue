@@ -53,6 +53,10 @@ function onLogout() {
   })
 }
 
+function goProfile() {
+  uni.navigateTo({ url: '/pages/mine/profile' })
+}
+
 function openLegal(name) {
   uni.navigateTo({ url: `/pages/legal/${name}` })
 }
@@ -110,7 +114,7 @@ onShow(() => {
     <view class="title">我的小窝🥰</view>
 
     <!-- AvatarNoteCard -->
-    <view class="avatar-card">
+    <view class="avatar-card press-bounce" @click="goProfile">
       <view class="avatar-ring">
         <image
           v-if="userStore.userInfo?.avatar"
@@ -118,12 +122,15 @@ onShow(() => {
           class="avatar"
           mode="aspectFill"
         />
-        <view v-else class="avatar fallback">{{ (userStore.nickname || 'S').slice(0, 1) }}</view>
+        <view v-else class="avatar fallback">{{ (userStore.userInfo?.nickname || '衣').slice(0, 1) }}</view>
       </view>
       <view class="who">
-        <view class="name">{{ userStore.nickname || 'shary' }}</view>
+        <view class="name">{{ userStore.userInfo?.nickname || '衣笺用户' }}</view>
         <view class="tag">💛 {{ tag }}</view>
         <view class="sub">桃桃陪你搭了 {{ logCount }} 套穿搭啦</view>
+        <view class="edit-hint" :class="{ todo: userStore.needsProfile }">
+          {{ userStore.needsProfile ? '完善头像和昵称 ›' : '编辑资料 ›' }}
+        </view>
       </view>
       <view class="peek">
         <TaotaoSprite mood="peek" :size="120" />
@@ -286,6 +293,18 @@ onShow(() => {
 .ico { font-size: 40rpx; }
 .ct { margin-top: 12rpx; font-size: 26rpx; font-weight: 700; }
 
+.edit-hint {
+  margin-top: 8rpx;
+  font-size: 22rpx;
+  color: #b5aab0;
+}
+.edit-hint.todo {
+  display: inline-block;
+  padding: 4rpx 14rpx;
+  border-radius: 999rpx;
+  color: #fff;
+  background: #ff8fb1;
+}
 .legal-links {
   margin-top: 28rpx;
   text-align: center;

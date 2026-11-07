@@ -10,12 +10,13 @@ import secrets
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Tuple
+from typing import Any, Dict, Tuple
 
 from flask import current_app
 from flask_jwt_extended import create_access_token
 
 from app.common.errors import ApiError
+from app.common.media import UPLOAD_PREFIX, to_storage_path
 from app.extensions import db
 from app.models.item import Item
 from app.models.outfit import Outfit, OutfitItem
@@ -24,6 +25,10 @@ from app.models.wear_log import WearLog
 
 # 邮箱正则（RFC 5322 简化版）
 EMAIL_PATTERN = re.compile(r'^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$')
+
+# 昵称长度上限（与前端编辑资料页一致）；头像允许的图片后缀
+NICKNAME_MAX_LENGTH = 20
+AVATAR_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.webp', '.gif')
 
 # 微信 code 换 openid 接口
 WX_CODE2SESSION_URL = 'https://api.weixin.qq.com/sns/jscode2session'
@@ -226,6 +231,47 @@ class AuthService:
             except OSError as e:
                 current_app.logger.warning('注销时删除图片失败 %s：%s', name, type(e).__name__)
         return count
+
+    # ---------------- 修改资料 ----------------
+    @staticmethod
+    def update_profile(user_id: int, data: Dict[str, Any]) -> User:
+        """
+        修改昵称 / 头像，出现哪个字段就改哪个
+          - nickname：去掉首尾空格后 1~20 个字
+          - avatar：只能是本人上传到本站的图片（POST /api/upload 返回的 url 或 path），
+                    防止填别人的图片或任意外部链接
+        :raises ApiError: 1004 参数错误 / 1005 用户不存在
+        """
+        user = AuthService.get_user_by_id(user_id)
+
+        if 'nickname' in data:
+            raw = data.get('nickname')
+            nickname = raw.strip() if isinstance(raw, str) else ''
+            if not nickname:
+                raise ApiError('昵称不能为空', code=1004)
+            if len(nickname) > NICKNAME_MAX_LENGTH:
+                raise ApiError(f'昵称不能超过 {NICKNAME_MAX_LENGTH} 个字', code=1004)
+            user.nickname = nickname
+
+        if 'avatar' in data:
+            user.avatar = AuthService._parse_own_avatar(user_id, data.get('avatar'))
+
+        db.session.commit()
+        return user
+
+    @staticmethod
+    def _parse_own_avatar(user_id: int, value: Any) -> str:
+        """头像必须是 /uploads/<本人 user_id>_xxx.<图片后缀>，且文件真实存在；返回库里保存的相对路径"""
+        path = to_storage_path(value) if isinstance(value, str) else None
+        if not isinstance(path, str) or not path.startswith(UPLOAD_PREFIX):
+            raise ApiError('头像需要先上传到本站', code=1004)
+        filename = path[len(UPLOAD_PREFIX):]
+        if ('/' in filename or '\\' in filename or not filename.startswith(f'{user_id}_')
+                or not filename.lower().endswith(AVATAR_EXTENSIONS)):
+            raise ApiError('只能使用自己上传的图片作为头像', code=1004)
+        if not os.path.isfile(os.path.join(current_app.config['UPLOAD_FOLDER'], filename)):
+            raise ApiError('头像图片不存在，请重新上传', code=1004)
+        return path
 
     # ---------------- 获取当前用户 ----------------
     @staticmethod

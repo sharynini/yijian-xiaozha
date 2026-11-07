@@ -39,6 +39,13 @@ def test_rejects_bad_extension(client, auth_header, folder):
     assert _post(client, auth_header, _image_bytes('PNG'), 'a.exe')['code'] == 6001
 
 
+def test_no_extension_checked_by_content(client, auth_header, folder):
+    """没有扩展名的文件按图片内容判断：真图片收下，假图片拒绝"""
+    body = _post(client, auth_header, _image_bytes('PNG'), 'avatar')
+    assert body['code'] == 0 and body['data']['path'].endswith('.png')
+    assert _post(client, auth_header, b'not-an-image', 'avatar')['code'] == 6001
+
+
 def test_extension_follows_real_format(client, auth_header, folder, user):
     body = _post(client, auth_header, _image_bytes('PNG'), 'photo.jpg')
     assert body['code'] == 0

@@ -92,6 +92,19 @@ def profile():
     return success(data=user.to_dict())
 
 
+@auth_bp.put('/profile')
+@jwt_required()
+def update_profile():
+    """
+    修改个人资料（部分更新）
+    PUT /api/auth/profile
+    Body: { "nickname"?: "新昵称", "avatar"?: "上传接口返回的 url 或 path" }
+    """
+    data = request.get_json(silent=True) or {}
+    user = AuthService.update_profile(int(get_jwt_identity()), data)
+    return success(data=user.to_dict(), msg='资料已更新')
+
+
 @auth_bp.delete('/account')
 @jwt_required()
 def delete_account():

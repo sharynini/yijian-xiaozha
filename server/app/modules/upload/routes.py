@@ -112,7 +112,9 @@ def upload_image():
     if file is None or not (file.filename or '').strip():
         raise ApiError('请选择要上传的图片', code=6001)
 
-    if _ext_of(file.filename) not in ALLOWED_EXTENSIONS:
+    # 有扩展名时先粗筛；没有扩展名（如小程序头像选择器、部分 H5 临时文件）交给下面的图片内容校验
+    ext = _ext_of(file.filename)
+    if ext and ext not in ALLOWED_EXTENSIONS:
         raise ApiError('图片格式不支持，仅支持 jpg、jpeg、png、webp、gif', code=6001)
 
     UPLOAD_LIMIT.limit = int(current_app.config.get('UPLOAD_RATE_LIMIT_PER_HOUR') or 60)
