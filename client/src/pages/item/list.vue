@@ -44,6 +44,10 @@ const loadError = ref(false)
 
 // ---------- 分类与筛选 ----------
 const currentType = ref('')
+// 「待确认」：批量添加后还没核对的衣物（needs_review = true）
+const reviewMode = ref(false)
+const pendingReview = ref(0)     // 后端列表接口返回的待确认数量
+const REVIEW_FLAG = 'wardrobe_open_review'   // 批量添加页跳过来时设置
 // 已生效的筛选条件；空串表示不限
 const filters = ref({ color: '', season: '', occasion: '' })
 // 面板里正在编辑、还没点「确定」的筛选条件
@@ -82,12 +86,14 @@ async function fetchItems(reset = false) {
   try {
     const params = { page: page.value, per_page: PER_PAGE }
     if (currentType.value) params.type = currentType.value
+    if (reviewMode.value) params.needs_review = 1
     Object.entries(filters.value).forEach(([k, v]) => {
       if (v) params[k] = v
     })
 
     const data = await get('/api/items', params)
     total.value = data.total || 0
+    pendingReview.value = data.pending_review || 0
     const list = data.list || []
     items.value = reset ? list : items.value.concat(list)
     loaded.value = true
@@ -104,8 +110,16 @@ function reload() {
 }
 
 function selectType(cat) {
-  if (currentType.value === cat.value) return
+  if (!reviewMode.value && currentType.value === cat.value) return
+  reviewMode.value = false
   currentType.value = cat.value
+  reload()
+}
+
+function openReview() {
+  if (reviewMode.value) return
+  reviewMode.value = true
+  currentType.value = ''
   reload()
 }
 
@@ -135,6 +149,15 @@ function clearChip(key) {
 
 // ---------- 生命周期 ----------
 onShow(() => {
+  // 批量添加页点「去核对」跳过来：直接打开「待确认」
+  try {
+    if (uni.getStorageSync(REVIEW_FLAG)) {
+      uni.removeStorageSync(REVIEW_FLAG)
+      tab.value = 'items'
+      reviewMode.value = true
+      currentType.value = ''
+    }
+  } catch (e) { /* 读不到标记就按普通方式刷新 */ }
   // 从添加/编辑页、画布页返回或切回衣橱 tab 时刷新当前标签
   if (tab.value === 'outfits') outfitListRef.value && outfitListRef.value.reload()
   else reload()
@@ -239,7 +262,11 @@ function cardTags(item) {
     { key: 'color', text: item.color, empty: '颜色未填' },
     { key: 'season', text: item.season, empty: '季节未填' },
     { key: 'occasion', text: item.occasion, empty: '场合未填' }
-  ].map((t) => ({ key: t.key, text: t.text || t.empty, cls: t.text ? t.key : 'none' }))
+  ].map((t) => ({
+    key: t.key,
+    text: t.text || t.empty,
+    cls: t.text && t.text !== '未分类' ? t.key : 'none'
+  }))
 }
 </script>
 
@@ -274,16 +301,31 @@ function cardTags(item) {
           <view v-if="activeFilterChips.length" class="dot">{{ activeFilterChips.length }}</view>
         </view>
         <view
+          v-if="pendingReview || reviewMode"
+          class="side-item"
+          :class="{ on: reviewMode }"
+          @click="openReview"
+        >
+          <text>待确认</text>
+          <view v-if="pendingReview" class="dot">{{ pendingReview }}</view>
+        </view>
+        <view
           v-for="cat in CATEGORIES"
           :key="cat.label"
           class="side-item"
-          :class="{ on: currentType === cat.value }"
+          :class="{ on: !reviewMode && currentType === cat.value }"
           @click="selectType(cat)"
         >{{ cat.label }}</view>
       </view>
 
       <!-- 右侧内容 -->
       <view class="main">
+        <view v-if="reviewMode" class="review-banner on">
+          点开每件衣服核对信息，确认后就会正式进入衣橱
+        </view>
+        <view v-else-if="pendingReview" class="review-banner" @click="openReview">
+          🧺 有 {{ pendingReview }} 件新衣服待确认，点这里核对 ›
+        </view>
         <view v-if="activeFilterChips.length" class="chips">
           <view
             v-for="chip in activeFilterChips"
@@ -304,7 +346,10 @@ function cardTags(item) {
               @touchend="onTouchEnd(item)"
               @click="onCardClick(item)"
             >
-              <view class="thumb"><SafeImage :src="item.image_url" /></view>
+              <view class="thumb">
+                <SafeImage :src="item.image_url" />
+                <view v-if="item.needs_review" class="review-badge">待确认</view>
+              </view>
               <view class="tags">
                 <text v-for="tag in cardTags(item)" :key="tag.key" class="tag" :class="tag.cls">{{ tag.text }}</text>
               </view>
@@ -321,7 +366,8 @@ function cardTags(item) {
         <view v-else-if="loaded && !items.length && !loading" class="empty">
           <TaotaoSprite mood="closet" :size="150" />
           <view class="empty-text">
-            {{ currentType || activeFilterChips.length ? '这里还没有符合条件的衣服' : '衣橱空空，快去上传你的漂亮衣服✨' }}
+            {{ reviewMode ? '待确认的衣服都核对完啦🎉'
+              : (currentType || activeFilterChips.length ? '这里还没有符合条件的衣服' : '衣橱空空，快去上传你的漂亮衣服✨') }}
           </view>
           <button class="btn-primary empty-btn" @click="goAdd">添加衣物</button>
         </view>
@@ -366,6 +412,34 @@ function cardTags(item) {
 </template>
 
 <style scoped>
+/* ---------- 待确认 ---------- */
+.review-banner {
+  margin: 0 0 16rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 16rpx;
+  background: #fff5f8;
+  border: 2rpx dashed #ffc4d6;
+  font-size: 24rpx;
+  color: #c0607f;
+}
+.review-banner.on {
+  background: #fffdfb;
+  color: #8a7f88;
+}
+.thumb {
+  position: relative;
+}
+.review-badge {
+  position: absolute;
+  left: 8rpx;
+  top: 8rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: #ff8fb1;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 700;
+}
 .page {
   min-height: 100vh;
   padding: 8rpx 20rpx 40rpx 0;

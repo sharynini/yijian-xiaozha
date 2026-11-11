@@ -141,8 +141,10 @@ function retryAll() {
   pump()
 }
 
+/** 衣橱是 tab 页，不能带参数跳转：先在本地存个标记，衣橱 onShow 读到后自动切到「待确认」 */
 function goReview() {
-  uni.redirectTo({ url: '/pages/item/list?review=1' })
+  try { uni.setStorageSync('wardrobe_open_review', 1) } catch (e) { /* 存不了就停在全部 */ }
+  uni.switchTab({ url: '/pages/item/list' })
 }
 
 function goSingle() {
