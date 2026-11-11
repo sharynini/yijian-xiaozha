@@ -229,7 +229,7 @@ function onCardClick(item) {
 }
 
 function goAdd() {
-  uni.navigateTo({ url: '/pages/item/add' })
+  uni.navigateTo({ url: '/pages/item/batch' })
 }
 
 /** 卡片上展示的标签：类型 / 颜色 / 季节 / 场合，四个都显示；没填的显示灰色「未填」 */

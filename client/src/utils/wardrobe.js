@@ -29,7 +29,7 @@ export async function ensureHasItems() {
     confirmText: '去添加',
     confirmColor: '#ff8fb1',
     success: (res) => {
-      if (res.confirm) uni.navigateTo({ url: '/pages/item/add' })
+      if (res.confirm) uni.navigateTo({ url: '/pages/item/batch' })
     }
   })
   return false

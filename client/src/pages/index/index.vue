@@ -211,7 +211,7 @@ const emptyHint = computed(() => {
 })
 
 function goAddItem() {
-  uni.navigateTo({ url: '/pages/item/add' })
+  uni.navigateTo({ url: '/pages/item/batch' })
 }
 
 function goRecord() {
