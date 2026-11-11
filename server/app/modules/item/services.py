@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from app.common.errors import ApiError
 from app.common.media import to_storage_path
 from app.extensions import db
-from app.models.item import Item
+from app.models.item import Item, UNCLASSIFIED_TYPE
 
 # 允许的字段取值（与 schema.sql 注释保持一致）
 ALLOWED_TYPES = {'上装', '下装', '连衣裙', '外套', '鞋子', '包包', '帽子', '配饰'}
@@ -21,7 +21,7 @@ ALLOWED_STATUS = {'正常', '洗衣中', '收纳中'}
 # 可写入的字段白名单
 EDITABLE_FIELDS = (
     'image_url', 'type', 'color', 'season', 'occasion',
-    'material', 'brand', 'price', 'purchase_date', 'status', 'remark',
+    'material', 'brand', 'price', 'purchase_date', 'status', 'remark', 'needs_review',
 )
 
 
@@ -54,6 +54,7 @@ class ItemService:
         color: Optional[str] = None,
         season: Optional[str] = None,
         occasion: Optional[str] = None,
+        needs_review: Optional[bool] = None,
         page: int = 1,
         per_page: int = 10,
     ) -> Tuple[List[Item], int]:
@@ -72,11 +73,22 @@ class ItemService:
             query = query.filter(Item.season == season)
         if occasion:
             query = query.filter(Item.occasion == occasion)
+        if needs_review is not None:
+            query = query.filter(Item.needs_review.is_(needs_review))
 
         query = query.order_by(Item.created_at.desc(), Item.id.desc())
 
         pagination = query.paginate(page=page, per_page=per_page, error_out=False)
         return pagination.items, pagination.total
+
+    @staticmethod
+    def count_pending_review(user_id: int) -> int:
+        """当前用户待确认（批量上传后尚未核对）的衣物数量"""
+        return Item.query.filter(
+            Item.user_id == user_id,
+            Item.deleted_at.is_(None),
+            Item.needs_review.is_(True),
+        ).count()
 
     # ---------------- 详情 ----------------
     @staticmethod
@@ -130,7 +142,7 @@ class ItemService:
         item_type = (data.get('type') or '').strip()
         if not item_type:
             raise ApiError('衣物类型不能为空', code=2002)
-        if item_type not in ALLOWED_TYPES:
+        if item_type not in ALLOWED_TYPES and item_type != UNCLASSIFIED_TYPE:
             raise ApiError(f'衣物类型不合法，可选：{"、".join(ALLOWED_TYPES)}', code=2002)
 
     @staticmethod
@@ -139,6 +151,14 @@ class ItemService:
         将请求数据写入模型实例，并做取值校验
         :param is_create: 新增时对未提供的字段使用默认值
         """
+        # 先算出写入后的「类别 + 待确认」组合并校验，避免改了一半才报错：
+        # 「未分类」只允许出现在待确认的衣物上，确认（needs_review=false）前必须先选好真实类别
+        target_review = (ItemService._parse_bool(data['needs_review']) if 'needs_review' in data
+                         else bool(item.needs_review))
+        target_type = (data.get('type') or '').strip() if 'type' in data else item.type
+        if target_type == UNCLASSIFIED_TYPE and not target_review:
+            raise ApiError('还没有选择衣物类别，请先选好类别再确认', code=2003)
+
         for field in EDITABLE_FIELDS:
             if field not in data:
                 continue  # 部分更新：未出现的字段保持原值
@@ -154,9 +174,12 @@ class ItemService:
 
             elif field == 'type':
                 value = (value or '').strip()
-                if value not in ALLOWED_TYPES:
+                if value not in ALLOWED_TYPES and value != UNCLASSIFIED_TYPE:
                     raise ApiError(f'衣物类型不合法，可选：{"、".join(ALLOWED_TYPES)}', code=2002)
                 item.type = value
+
+            elif field == 'needs_review':
+                item.needs_review = target_review
 
             elif field == 'season':
                 value = (value or '').strip() or None
@@ -195,6 +218,19 @@ class ItemService:
                 item.status = '正常'
             if item.wear_count is None:
                 item.wear_count = 0
+            if item.needs_review is None:
+                item.needs_review = False
+
+    @staticmethod
+    def _parse_bool(value: Any) -> bool:
+        """解析布尔参数：支持 true/false、1/0 及其字符串形式"""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str) and value.strip().lower() in ('true', '1', 'false', '0'):
+            return value.strip().lower() in ('true', '1')
+        raise ApiError('needs_review 只能是 true 或 false', code=2002)
 
     @staticmethod
     def _parse_price(value: Any) -> Optional[Decimal]:

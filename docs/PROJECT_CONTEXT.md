@@ -130,7 +130,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | 方法 | 路径 | 请求字段 | 响应 `data` |
 |------|------|----------|-------------|
 | POST | `/api/items` | 必填 `image_url`、`type`；可选 `color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark` | `Item.to_dict()` |
-| GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list }` |
+| GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`needs_review`（选填，1/true 只看待确认，0/false 只看已确认）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list, pending_review }`（`pending_review` 为待确认总数，不受筛选影响） |
 | GET | `/api/items/<item_id>` | — | `Item.to_dict()` |
 | PUT | `/api/items/<item_id>` | 部分更新，字段同创建白名单 | `Item.to_dict()` |
 | DELETE | `/api/items/<item_id>` | — | 软删除 |
@@ -141,11 +141,12 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 - `season` ∈ {春, 夏, 秋, 冬, 全季}
 - `occasion` ∈ {日常, 工作, 运动, 正式}
 - `status` ∈ {正常, 洗衣中, 收纳中}
+- 待确认（批量上传）：创建或更新时可传 `needs_review`（布尔，默认 false）。AI 没认出类别时 `type` 可传内部类别「未分类」，但必须同时 `needs_review=true`；把 `needs_review` 改为 false（确认）时类别不能是「未分类」，否则返回 2003。「未分类」衣物不参与推荐；已识别出类别、只是未核对的衣物照常参与
 - `color`：前端与 AI 使用 15 个固定选项（黑色、白色、灰色、米色、卡其、棕色、蓝色、牛仔蓝、绿色、红色、粉色、紫色、黄色、橙色、花色）；后端不校验颜色取值，按纯文本存储（空串存 NULL）
 
 `image_url` 写库前经 `to_storage_path` 转为相对路径 `/uploads/xxx`，返回时经 `to_public_url` 拼完整地址（见 2.9）。
 
-`Item.to_dict()` 字段：`item_id`、`user_id`、`image_url`、`type`、`color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`、`wear_count`、`created_at`、`updated_at`。
+`Item.to_dict()` 字段：`item_id`、`user_id`、`image_url`、`type`、`color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`、`wear_count`、`needs_review`、`created_at`、`updated_at`。
 
 ### 2.4 搭配（前缀 `/api/outfits`，均需 JWT）
 
@@ -251,7 +252,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 ### 3.0 迁移
 
-- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage`
+- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage` → `e7b9d1f3a5c6_add_item_needs_review`
 - 已有库升级：`cd server && flask db upgrade`（需已加载 `server/.env`；具体 `FLASK_APP` 设置：待确认）
 - 新建库：执行 `schema.sql`（已与最新迁移同步），再执行 `flask db stamp head`
 - 改模型后：`flask db migrate -m "说明"` 生成脚本，检查后 `flask db upgrade`
@@ -285,6 +286,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | status | VARCHAR(20) NOT NULL DEFAULT '正常' | 正常/洗衣中/收纳中 |
 | remark | TEXT NULL | |
 | wear_count | INT UNSIGNED DEFAULT 0 | 记录日记时可 +1 |
+| needs_review | TINYINT(1) NOT NULL DEFAULT 0 | 待确认（批量上传后未核对）；索引 `idx_user_review(user_id, needs_review)` |
 | created_at / updated_at / deleted_at | DATETIME | 软删除 |
 
 ### 3.3 `outfit` / 3.4 `outfit_item`
