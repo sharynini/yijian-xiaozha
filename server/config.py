@@ -69,7 +69,12 @@ class Config:
     MAX_CONTENT_LENGTH = 5 * 1024 * 1024
     # 上传图片：最长边超过该值会等比缩小；每用户每小时上传张数上限
     UPLOAD_MAX_SIDE = 2048
-    UPLOAD_RATE_LIMIT_PER_HOUR = 60
+    UPLOAD_RATE_LIMIT_PER_HOUR = int(os.getenv('UPLOAD_RATE_LIMIT_PER_HOUR') or 150)
+    # AI 识别 / 抠图的按用户限流（每小时 + 24 小时总量），批量上传需要较宽的每小时额度
+    AI_RECOGNIZE_LIMIT_PER_HOUR = int(os.getenv('AI_RECOGNIZE_LIMIT_PER_HOUR') or 100)
+    AI_RECOGNIZE_LIMIT_PER_DAY = int(os.getenv('AI_RECOGNIZE_LIMIT_PER_DAY') or 300)
+    AI_CUTOUT_LIMIT_PER_HOUR = int(os.getenv('AI_CUTOUT_LIMIT_PER_HOUR') or 120)
+    AI_CUTOUT_LIMIT_PER_DAY = int(os.getenv('AI_CUTOUT_LIMIT_PER_DAY') or 400)
 
     # 登录 / 注册 / 上传限流（app/common/ratelimit.py）；测试环境关闭
     RATELIMIT_ENABLED = True

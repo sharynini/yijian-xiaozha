@@ -220,8 +220,8 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | POST | `/api/ai/cutout` | Body：`image_url` | `{ url, path }`：新生成的透明 PNG（原图文件保留） |
 
 - 两个接口都只接受本人上传到本站的图片（文件名须以 `<user_id>_` 开头，禁止目录穿越）
-- 识别：图片转 base64 发给通义千问 VL（默认模型 `qwen3-vl-plus`），后端再按枚举校验一遍；每用户每小时 30 次
-- 抠图：本地 rembg，先缩放到最长边 `CUTOUT_MAX_SIDE`（默认 1024），只保留最大主体并裁掉透明边；每用户每小时 60 次；掩码后处理默认关闭
+- 识别：图片转 base64 发给通义千问 VL（默认模型 `qwen3-vl-plus`），后端再按枚举校验一遍；每用户每小时 100 次、24 小时 300 次（`AI_RECOGNIZE_LIMIT_PER_HOUR` / `_PER_DAY`）
+- 抠图：本地 rembg，先缩放到最长边 `CUTOUT_MAX_SIDE`（默认 1024），只保留最大主体并裁掉透明边；每用户每小时 120 次、24 小时 400 次（`AI_CUTOUT_LIMIT_PER_HOUR` / `_PER_DAY`）；掩码后处理默认关闭
 - 频率限制为进程内计数（多进程部署时各进程独立计数）
 
 ### 2.9 上传与静态资源（`upload` 蓝图无 url_prefix）
@@ -232,7 +232,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | GET | `/uploads/<filename>` | 否 | — | 直接返回图片文件 |
 
 - 文件名 `<user_id>_<uuid>.<ext>`；单请求上限 5MB（`MAX_CONTENT_LENGTH`）
-- 处理流程（`upload/routes.py`）：每用户每小时 `UPLOAD_RATE_LIMIT_PER_HOUR`（60）张 → 用 Pillow 校验必须是真实的 JPEG/PNG/WEBP/GIF（扩展名按实际格式决定）→ 按 EXIF 方向转正并**去掉全部元数据**（含 GPS）→ 最长边超过 `UPLOAD_MAX_SIDE`（2048）等比缩小；GIF 只校验不改写；像素超过 4000 万拒绝
+- 处理流程（`upload/routes.py`）：每用户每小时 `UPLOAD_RATE_LIMIT_PER_HOUR`（默认 150）张 → 用 Pillow 校验必须是真实的 JPEG/PNG/WEBP/GIF（扩展名按实际格式决定）→ 按 EXIF 方向转正并**去掉全部元数据**（含 GPS）→ 最长边超过 `UPLOAD_MAX_SIDE`（2048）等比缩小；GIF 只校验不改写；像素超过 4000 万拒绝
 - 生产环境 `/uploads/` 由 nginx 直接提供，只允许单层文件名 + 图片后缀
 - 图片地址约定（`common/media.py`）：库里只存相对路径 `/uploads/xxx`；返回时优先用 `PUBLIC_BASE_URL` 拼接，未配置则用当前请求域名
 
@@ -412,7 +412,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 ### 5.2 安全与运维
 
 - `/uploads/<filename>` 无需鉴权即可访问，靠 uuid 文件名防猜测；日记现场照等私人图片也走这里
-- 限流（`common/ratelimit.py`：登录 10 次/分钟、注册 10 次/小时、微信登录 20 次/分钟按 IP；上传 60 张/小时按用户）、AI 限流和天气缓存都在进程内存里：gunicorn 固定单进程以保证计数准确，进程重启后清零；扩容多进程前需换成 Redis 等共享存储
+- 限流（`common/ratelimit.py`：登录 10 次/分钟、注册 10 次/小时、微信登录 20 次/分钟按 IP；上传 150 张/小时按用户（`UPLOAD_RATE_LIMIT_PER_HOUR`））、AI 限流和天气缓存都在进程内存里：gunicorn 固定单进程以保证计数准确，进程重启后清零；扩容多进程前需换成 Redis 等共享存储
 - 限流按 IP 依赖 `TRUST_PROXY=1` + nginx 覆盖 `X-Forwarded-For`；本机直连时不要开
 - 备份：`deploy/backup.sh` 每日 mysqldump + 打包 uploads，保留 14 天；与数据同机，需定期下载或同步到对象存储
 - rembg 首次加载模型较慢、内存占用较大，服务器建议 2 核 4G 起（待确认具体占用）；生产模型目录由 `U2NET_HOME` 指定
