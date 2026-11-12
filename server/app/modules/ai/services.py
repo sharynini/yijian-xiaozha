@@ -50,12 +50,17 @@ MIME_BY_EXT = {
     'webp': 'image/webp', 'gif': 'image/gif',
 }
 
-RATE_LIMIT = 30                 # 每用户每小时最多识别次数
+# 频率限制默认值（可在 config / .env 中覆盖，见 AI_RECOGNIZE_LIMIT_PER_HOUR 等配置项）。
+# 批量上传一次可能有二三十件，所以每小时额度放宽；再加一个 24 小时总上限，防止被刷导致 AI 费用失控
+RATE_LIMIT = 100                # 每用户每小时最多识别次数
+RATE_LIMIT_PER_DAY = 300        # 每用户 24 小时内最多识别次数
 RATE_WINDOW_SECONDS = 3600
+DAY_WINDOW_SECONDS = 24 * 3600
 REQUEST_TIMEOUT_SECONDS = 30
 
-# 进程内频率记录：{user_id: deque[时间戳]}
+# 进程内频率记录：{user_id: deque[时间戳]}（小时窗口、24 小时窗口各一份）
 _calls: Dict[int, Deque[float]] = defaultdict(deque)
+_daily_calls: Dict[int, Deque[float]] = defaultdict(deque)
 
 PROMPT = (
     '你是衣物识别助手。请看图片中的这件衣物（如有多件，只看最主要的一件），'
@@ -83,7 +88,7 @@ class AiService:
             raise ApiError('AI 识别服务未配置', code=8001)
 
         path = AiService._resolve_own_upload(user_id, image_url)
-        AiService._check_rate_limit(user_id)
+        AiService._check_rate_limit(user_id, 'recognize')
 
         with open(path, 'rb') as f:
             raw = f.read()
@@ -114,16 +119,41 @@ class AiService:
         return full
 
     @staticmethod
-    def _check_rate_limit(user_id: int, calls: Optional[Dict[int, Deque[float]]] = None,
-                          limit: int = RATE_LIMIT, msg: str = '识别太频繁了，请稍后再试或手动选择') -> None:
-        calls = _calls if calls is None else calls
+    def _check_rate_limit(user_id: int, kind: str = 'recognize') -> None:
+        """
+        按用户做两级限流：每小时上限 + 24 小时总上限（滑动窗口，进程内计数）
+        :param kind: recognize（AI 识别）或 cutout（本地抠图）
+        :raises ApiError: 8004 超出额度
+        """
+        if kind == 'cutout':
+            hour_store, day_store = _cutout_calls, _cutout_daily_calls
+            hour_limit = int(current_app.config.get('AI_CUTOUT_LIMIT_PER_HOUR') or CUTOUT_RATE_LIMIT)
+            day_limit = int(current_app.config.get('AI_CUTOUT_LIMIT_PER_DAY') or CUTOUT_RATE_LIMIT_PER_DAY)
+            hour_msg = '抠图太频繁了，请稍后再试'
+            day_msg = '今天的抠图次数已用完，明天再来吧（已保留原图）'
+        else:
+            hour_store, day_store = _calls, _daily_calls
+            hour_limit = int(current_app.config.get('AI_RECOGNIZE_LIMIT_PER_HOUR') or RATE_LIMIT)
+            day_limit = int(current_app.config.get('AI_RECOGNIZE_LIMIT_PER_DAY') or RATE_LIMIT_PER_DAY)
+            hour_msg = '识别太频繁了，请稍后再试或手动选择'
+            day_msg = '今天的 AI 识别次数已用完，明天再来或手动选择'
+
         now = time.time()
-        history = calls[user_id]
-        while history and history[0] <= now - RATE_WINDOW_SECONDS:
+        hour = AiService._trim(hour_store[user_id], now - RATE_WINDOW_SECONDS)
+        day = AiService._trim(day_store[user_id], now - DAY_WINDOW_SECONDS)
+        if len(day) >= day_limit:
+            raise ApiError(day_msg, code=8004)
+        if len(hour) >= hour_limit:
+            raise ApiError(hour_msg, code=8004)
+        hour.append(now)
+        day.append(now)
+
+    @staticmethod
+    def _trim(history: Deque[float], cutoff: float) -> Deque[float]:
+        """丢掉窗口之外的旧记录"""
+        while history and history[0] <= cutoff:
             history.popleft()
-        if len(history) >= limit:
-            raise ApiError(msg, code=8004)
-        history.append(now)
+        return history
 
     # ---------------- 调用模型 ----------------
     @staticmethod
@@ -199,7 +229,8 @@ class AiService:
 # =====================================================================
 # 本地抠图（rembg）
 # =====================================================================
-CUTOUT_RATE_LIMIT = 60           # 每用户每小时最多抠图次数（本地计算，防止 CPU 被刷满）
+CUTOUT_RATE_LIMIT = 120          # 每用户每小时最多抠图次数（本地计算，防止 CPU 被刷满；可用配置覆盖）
+CUTOUT_RATE_LIMIT_PER_DAY = 400  # 每用户 24 小时内最多抠图次数
 CUTOUT_ALPHA_THRESHOLD = 16      # 透明度低于它的像素视为背景（用于裁边）
 CUTOUT_MIN_AREA_RATIO = 0.01     # 前景面积不到原图 1%，视为没抠出东西
 CUTOUT_PADDING_RATIO = 0.04      # 裁边后四周留一点空白
@@ -207,6 +238,7 @@ CUTOUT_KEEP_RATIO = 0.3          # 只保留主体：面积不小于最大色块
 CUTOUT_LABEL_SIDE = 384          # 找连通块时把掩码缩到这个边长，兼顾速度与精度
 
 _cutout_calls: Dict[int, Deque[float]] = defaultdict(deque)
+_cutout_daily_calls: Dict[int, Deque[float]] = defaultdict(deque)
 _session = None                  # rembg 模型会话：只加载一次，常驻内存
 _session_lock = threading.Lock()
 
@@ -221,7 +253,7 @@ class CutoutService:
         :raises ApiError: 8002 图片无效 / 8004 太频繁 / 8005 未安装 / 8006 没抠出衣物 / 8007 抠图失败
         """
         src = AiService._resolve_own_upload(user_id, image_url)
-        AiService._check_rate_limit(user_id, _cutout_calls, CUTOUT_RATE_LIMIT, '抠图太频繁了，请稍后再试')
+        AiService._check_rate_limit(user_id, 'cutout')
 
         try:
             from PIL import Image, ImageOps

@@ -39,6 +39,16 @@ def _parse_pagination() -> tuple:
     return page, per_page
 
 
+def _parse_review_filter():
+    """列表的 needs_review 筛选：1/true 只看待确认，0/false 只看已确认，其他值或不传则不筛选"""
+    raw = (request.args.get('needs_review') or '').strip().lower()
+    if raw in ('1', 'true'):
+        return True
+    if raw in ('0', 'false'):
+        return False
+    return None
+
+
 @item_bp.post('')
 @jwt_required()
 def create_item():
@@ -46,7 +56,9 @@ def create_item():
     添加衣物
     POST /api/items
     Header: Authorization: Bearer <token>
-    Body: { image_url, type, color?, season?, occasion?, material?, brand?, price?, purchase_date?, status?, remark? }
+    Body: { image_url, type, color?, season?, occasion?, material?, brand?, price?, purchase_date?, status?, remark?,
+            needs_review? }
+    批量上传时传 needs_review=true；AI 没认出类别时 type 可传「未分类」（必须同时 needs_review=true）
     """
     user_id = _current_user_id()
     data = request.get_json(silent=True) or {}
@@ -60,7 +72,8 @@ def create_item():
 def list_items():
     """
     获取衣物列表（筛选 + 分页）
-    GET /api/items?type=&color=&season=&occasion=&page=&per_page=
+    GET /api/items?type=&color=&season=&occasion=&needs_review=&page=&per_page=
+    响应额外返回 pending_review：当前用户待确认的衣物总数
     Header: Authorization: Bearer <token>
     """
     user_id = _current_user_id()
@@ -72,6 +85,7 @@ def list_items():
         color=request.args.get('color'),
         season=request.args.get('season'),
         occasion=request.args.get('occasion'),
+        needs_review=_parse_review_filter(),
         page=page,
         per_page=per_page,
     )
@@ -81,6 +95,8 @@ def list_items():
         'page': page,
         'per_page': per_page,
         'list': [item.to_dict() for item in items],
+        # 待确认数量（不受筛选条件影响），衣橱页据此提示「有 N 件待确认」
+        'pending_review': ItemService.count_pending_review(user_id),
     })
 
 

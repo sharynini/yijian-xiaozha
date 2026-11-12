@@ -7,6 +7,10 @@ from datetime import datetime
 from app.common.media import to_public_url
 from app.extensions import db
 
+# 内部类别：批量上传时 AI 未能识别类别的衣物先存为「未分类」，必须同时处于待确认状态，
+# 不出现在用户可选的类别里，也不参与推荐
+UNCLASSIFIED_TYPE = '未分类'
+
 
 class Item(db.Model):
     __tablename__ = 'item'
@@ -19,6 +23,7 @@ class Item(db.Model):
         db.Index('idx_status', 'status'),
         db.Index('idx_deleted_at', 'deleted_at'),
         db.Index('idx_user_deleted', 'user_id', 'deleted_at'),
+        db.Index('idx_user_review', 'user_id', 'needs_review'),
         {'comment': '衣物表'},
     )
 
@@ -37,6 +42,8 @@ class Item(db.Model):
     status = db.Column(db.String(20), nullable=False, default='正常', server_default='正常', comment='状态：正常/洗衣中/收纳中')
     remark = db.Column(db.Text, nullable=True, comment='备注')
     wear_count = db.Column(db.Integer, nullable=False, default=0, server_default='0', comment='累计穿着次数')
+    needs_review = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'),
+                             comment='是否待确认：批量上传后 AI 自动填写、用户尚未核对')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,
                            server_default=db.text('CURRENT_TIMESTAMP'), comment='创建时间')
     updated_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow,
@@ -61,6 +68,7 @@ class Item(db.Model):
             'status': self.status,
             'remark': self.remark,
             'wear_count': self.wear_count,
+            'needs_review': bool(self.needs_review),
             'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
             'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
         }

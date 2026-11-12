@@ -130,7 +130,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | 方法 | 路径 | 请求字段 | 响应 `data` |
 |------|------|----------|-------------|
 | POST | `/api/items` | 必填 `image_url`、`type`；可选 `color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark` | `Item.to_dict()` |
-| GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list }` |
+| GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`needs_review`（选填，1/true 只看待确认，0/false 只看已确认）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list, pending_review }`（`pending_review` 为待确认总数，不受筛选影响） |
 | GET | `/api/items/<item_id>` | — | `Item.to_dict()` |
 | PUT | `/api/items/<item_id>` | 部分更新，字段同创建白名单 | `Item.to_dict()` |
 | DELETE | `/api/items/<item_id>` | — | 软删除 |
@@ -141,11 +141,12 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 - `season` ∈ {春, 夏, 秋, 冬, 全季}
 - `occasion` ∈ {日常, 工作, 运动, 正式}
 - `status` ∈ {正常, 洗衣中, 收纳中}
+- 待确认（批量上传）：创建或更新时可传 `needs_review`（布尔，默认 false）。AI 没认出类别时 `type` 可传内部类别「未分类」，但必须同时 `needs_review=true`；把 `needs_review` 改为 false（确认）时类别不能是「未分类」，否则返回 2003。「未分类」衣物不参与推荐；已识别出类别、只是未核对的衣物照常参与
 - `color`：前端与 AI 使用 15 个固定选项（黑色、白色、灰色、米色、卡其、棕色、蓝色、牛仔蓝、绿色、红色、粉色、紫色、黄色、橙色、花色）；后端不校验颜色取值，按纯文本存储（空串存 NULL）
 
 `image_url` 写库前经 `to_storage_path` 转为相对路径 `/uploads/xxx`，返回时经 `to_public_url` 拼完整地址（见 2.9）。
 
-`Item.to_dict()` 字段：`item_id`、`user_id`、`image_url`、`type`、`color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`、`wear_count`、`created_at`、`updated_at`。
+`Item.to_dict()` 字段：`item_id`、`user_id`、`image_url`、`type`、`color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark`、`wear_count`、`needs_review`、`created_at`、`updated_at`。
 
 ### 2.4 搭配（前缀 `/api/outfits`，均需 JWT）
 
@@ -219,8 +220,8 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | POST | `/api/ai/cutout` | Body：`image_url` | `{ url, path }`：新生成的透明 PNG（原图文件保留） |
 
 - 两个接口都只接受本人上传到本站的图片（文件名须以 `<user_id>_` 开头，禁止目录穿越）
-- 识别：图片转 base64 发给通义千问 VL（默认模型 `qwen3-vl-plus`），后端再按枚举校验一遍；每用户每小时 30 次
-- 抠图：本地 rembg，先缩放到最长边 `CUTOUT_MAX_SIDE`（默认 1024），只保留最大主体并裁掉透明边；每用户每小时 60 次；掩码后处理默认关闭
+- 识别：图片转 base64 发给通义千问 VL（默认模型 `qwen3-vl-plus`），后端再按枚举校验一遍；每用户每小时 100 次、24 小时 300 次（`AI_RECOGNIZE_LIMIT_PER_HOUR` / `_PER_DAY`）
+- 抠图：本地 rembg，先缩放到最长边 `CUTOUT_MAX_SIDE`（默认 1024），只保留最大主体并裁掉透明边；每用户每小时 120 次、24 小时 400 次（`AI_CUTOUT_LIMIT_PER_HOUR` / `_PER_DAY`）；掩码后处理默认关闭
 - 频率限制为进程内计数（多进程部署时各进程独立计数）
 
 ### 2.9 上传与静态资源（`upload` 蓝图无 url_prefix）
@@ -231,7 +232,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | GET | `/uploads/<filename>` | 否 | — | 直接返回图片文件 |
 
 - 文件名 `<user_id>_<uuid>.<ext>`；单请求上限 5MB（`MAX_CONTENT_LENGTH`）
-- 处理流程（`upload/routes.py`）：每用户每小时 `UPLOAD_RATE_LIMIT_PER_HOUR`（60）张 → 用 Pillow 校验必须是真实的 JPEG/PNG/WEBP/GIF（扩展名按实际格式决定）→ 按 EXIF 方向转正并**去掉全部元数据**（含 GPS）→ 最长边超过 `UPLOAD_MAX_SIDE`（2048）等比缩小；GIF 只校验不改写；像素超过 4000 万拒绝
+- 处理流程（`upload/routes.py`）：每用户每小时 `UPLOAD_RATE_LIMIT_PER_HOUR`（默认 150）张 → 用 Pillow 校验必须是真实的 JPEG/PNG/WEBP/GIF（扩展名按实际格式决定）→ 按 EXIF 方向转正并**去掉全部元数据**（含 GPS）→ 最长边超过 `UPLOAD_MAX_SIDE`（2048）等比缩小；GIF 只校验不改写；像素超过 4000 万拒绝
 - 生产环境 `/uploads/` 由 nginx 直接提供，只允许单层文件名 + 图片后缀
 - 图片地址约定（`common/media.py`）：库里只存相对路径 `/uploads/xxx`；返回时优先用 `PUBLIC_BASE_URL` 拼接，未配置则用当前请求域名
 
@@ -251,7 +252,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 ### 3.0 迁移
 
-- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage`
+- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage` → `e7b9d1f3a5c6_add_item_needs_review`
 - 已有库升级：`cd server && flask db upgrade`（需已加载 `server/.env`；具体 `FLASK_APP` 设置：待确认）
 - 新建库：执行 `schema.sql`（已与最新迁移同步），再执行 `flask db stamp head`
 - 改模型后：`flask db migrate -m "说明"` 生成脚本，检查后 `flask db upgrade`
@@ -285,6 +286,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | status | VARCHAR(20) NOT NULL DEFAULT '正常' | 正常/洗衣中/收纳中 |
 | remark | TEXT NULL | |
 | wear_count | INT UNSIGNED DEFAULT 0 | 记录日记时可 +1 |
+| needs_review | TINYINT(1) NOT NULL DEFAULT 0 | 待确认（批量上传后未核对）；索引 `idx_user_review(user_id, needs_review)` |
 | created_at / updated_at / deleted_at | DATETIME | 软删除 |
 
 ### 3.3 `outfit` / 3.4 `outfit_item`
@@ -335,8 +337,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | path | 标题 | tabBar | 备注 |
 |------|------|--------|------|
 | pages/index/index | 今日推荐 | 首页 | 自定义导航栏 |
-| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏；顶部「衣物 / 搭配」标签 |
-| pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=` |
+| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏；顶部「衣物 / 搭配」标签；左侧「待确认」（`needs_review=1`，数量取列表接口的 `pending_review`），批量页通过本地标记 `wardrobe_open_review` 跳入 |
+| pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=`；待确认衣物显示为「核对衣物」，保存时一并提交 `needs_review:false`，「未分类」会被清空要求重选 |
+| pages/item/batch | 批量添加 | 否 | 各「添加衣物」入口默认进入；上传 → 抠图 → 识别 → 存为待确认，并发 2、单批 ≤30 张；断网可从失败步骤续传 |
 | pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 载入推荐结果；`?outfit_id=` 载入已保存搭配（标题「编辑搭配」） |
 | pages/diary/create | 轻量日记 | 否 | |
 | pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
@@ -410,7 +413,7 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 ### 5.2 安全与运维
 
 - `/uploads/<filename>` 无需鉴权即可访问，靠 uuid 文件名防猜测；日记现场照等私人图片也走这里
-- 限流（`common/ratelimit.py`：登录 10 次/分钟、注册 10 次/小时、微信登录 20 次/分钟按 IP；上传 60 张/小时按用户）、AI 限流和天气缓存都在进程内存里：gunicorn 固定单进程以保证计数准确，进程重启后清零；扩容多进程前需换成 Redis 等共享存储
+- 限流（`common/ratelimit.py`：登录 10 次/分钟、注册 10 次/小时、微信登录 20 次/分钟按 IP；上传 150 张/小时按用户（`UPLOAD_RATE_LIMIT_PER_HOUR`））、AI 限流和天气缓存都在进程内存里：gunicorn 固定单进程以保证计数准确，进程重启后清零；扩容多进程前需换成 Redis 等共享存储
 - 限流按 IP 依赖 `TRUST_PROXY=1` + nginx 覆盖 `X-Forwarded-For`；本机直连时不要开
 - 备份：`deploy/backup.sh` 每日 mysqldump + 打包 uploads，保留 14 天；与数据同机，需定期下载或同步到对象存储
 - rembg 首次加载模型较慢、内存占用较大，服务器建议 2 核 4G 起（待确认具体占用）；生产模型目录由 `U2NET_HOME` 指定
@@ -487,6 +490,6 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-06 共 143 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-12 共 174 项通过）
 5. 本机试跑生产模式：`cd server && GUNICORN_BIND=127.0.0.1:5002 venv/bin/gunicorn -c gunicorn.conf.py wsgi:app`
 6. 上线部署：见 `deploy/README.md`

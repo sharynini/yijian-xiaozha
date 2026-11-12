@@ -40,7 +40,7 @@ CREATE TABLE `item` (
     `id`              BIGINT UNSIGNED     NOT NULL AUTO_INCREMENT COMMENT '主键ID',
     `user_id`         BIGINT UNSIGNED     NOT NULL COMMENT '所属用户ID',
     `image_url`       VARCHAR(500)        NOT NULL COMMENT '衣物照片URL',
-    `type`            VARCHAR(20)         NOT NULL COMMENT '类型：上装/下装/外套/鞋子/配饰等',
+    `type`            VARCHAR(20)         NOT NULL COMMENT '类型：上装/下装/连衣裙/外套/鞋子/包包/帽子/配饰；未分类=待确认的内部类别',
     `color`           VARCHAR(20)         DEFAULT NULL COMMENT '颜色',
     `season`          VARCHAR(10)         DEFAULT NULL COMMENT '适用季节：春/夏/秋/冬/全季',
     `occasion`        VARCHAR(20)         DEFAULT NULL COMMENT '适用场合：日常/工作/运动/正式等',
@@ -51,6 +51,7 @@ CREATE TABLE `item` (
     `status`          VARCHAR(20)         NOT NULL DEFAULT '正常' COMMENT '状态：正常/洗衣中/收纳中',
     `remark`          TEXT                DEFAULT NULL COMMENT '备注',
     `wear_count`      INT UNSIGNED        NOT NULL DEFAULT 0 COMMENT '累计穿着次数',
+    `needs_review`    TINYINT(1)          NOT NULL DEFAULT 0 COMMENT '是否待确认：批量上传后 AI 自动填写、用户尚未核对',
     `created_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     `deleted_at`      DATETIME            DEFAULT NULL COMMENT '软删除时间',
@@ -62,6 +63,7 @@ CREATE TABLE `item` (
     KEY `idx_status` (`status`),
     KEY `idx_deleted_at` (`deleted_at`),
     KEY `idx_user_deleted` (`user_id`, `deleted_at`),
+    KEY `idx_user_review` (`user_id`, `needs_review`),
     CONSTRAINT `fk_item_user` FOREIGN KEY (`user_id`) REFERENCES `user` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='衣物表';
 

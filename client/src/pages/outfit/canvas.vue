@@ -391,7 +391,7 @@ async function updateOutfit() {
 
 function goAdd() {
   // 衣橱为空时引导去添加
-  uni.navigateTo({ url: '/pages/item/add' })
+  uni.navigateTo({ url: '/pages/item/batch' })
 }
 </script>
 

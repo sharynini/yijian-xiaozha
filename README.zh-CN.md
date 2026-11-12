@@ -11,7 +11,7 @@
 ![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)
 ![uni-app](https://img.shields.io/badge/uni--app-cross--platform-2B9939)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
-![Tests](https://img.shields.io/badge/pytest-143%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/pytest-174%20passing-brightgreen)
 
 <!-- TODO(shary): 补一张产品主视觉/手机样机图，建议放 docs/screenshots/hero.png
 <p align="center">
@@ -21,7 +21,7 @@
 
 ## 核心亮点
 
-- **AI 衣物入库**：上传一张照片即可自动完成处理——本地模型抠图去背景（rembg `isnet-general-use`，CPU 运行）→ 通义千问视觉大模型识别分类/颜色/季节/场合，识别结果经后端枚举二次校验后回填表单。
+- **AI 批量入库**：一次最多选 30 张照片，每张自动完成上传 → 本地模型抠图去背景（rembg `isnet-general-use`，CPU 运行）→ 通义千问视觉大模型识别分类/颜色/季节/场合（经后端枚举二次校验）。采用「先存后改」：识别完直接存为「待确认」，用户只需改 AI 识别错的地方。两张并发处理、逐张显示进度；抠图失败用原图、识别失败存为「未分类」；断网后从失败的那一步继续，不重复上传、不重复消耗 AI 次数；AI 接口按用户设每小时 + 每天两级限额。
 - **手动搭配画布**：拖动、缩放、叠放衣物拼成拼贴（`collage` JSON 记录每件的位置/宽度/层级）；布局随搭配方案和日记一起持久化，可像素级还原展示。
 - **可解释的规则推荐**：每日 3 套穿搭建议——实时温度映射季节、场合匹配、自动配鞋配外套、近 7 天穿过的单品降权；每套建议都附带可读的推荐理由。
 - **轻量穿搭日记与时间轴**：一键记录今日穿搭；心情 emoji、一句话、现场照全部选填。时间轴按月分段、支持按日期筛选；衣物快照保证删除衣物后历史记录仍完整可看。
@@ -31,12 +31,14 @@
 
 <table>
   <tr>
+    <td><img src="docs/screenshots/batch.png" width="200"/></td>
     <td><img src="docs/screenshots/recommend.png" width="200"/></td>
     <td><img src="docs/screenshots/wardrobe.png" width="200"/></td>
     <td><img src="docs/screenshots/canvas.png" width="200"/></td>
     <td><img src="docs/screenshots/timeline.png" width="200"/></td>
   </tr>
   <tr>
+    <td align="center">AI 批量入库</td>
     <td align="center">今日推荐</td>
     <td align="center">我的衣橱</td>
     <td align="center">搭配画布</td>
@@ -53,7 +55,7 @@
 | 数据库 | MySQL（utf8mb4 / InnoDB），驱动 PyMySQL |
 | AI | 通义千问 VL（DashScope）衣物识别；rembg 服务端抠图 |
 | 外部服务 | 和风天气（实时气温驱动推荐） |
-| 测试 | pytest —— 143 项测试，内存 SQLite，不依赖业务库 |
+| 测试 | pytest —— 174 项测试，内存 SQLite，不依赖业务库 |
 | 部署 | gunicorn（1×8）+ nginx；`deploy/` 含 systemd 单元与每日 mysqldump 备份脚本 |
 
 ## 架构图
@@ -137,7 +139,7 @@ npm run dev:h5
 cd server && python -m pytest -q
 ```
 
-143 项测试覆盖：认证（含微信登录与账号注销）、衣物增删改查、搭配 collage 校验、日记快照、推荐引擎、上传安全、限流、天气与 AI 接口——全部运行在内存 SQLite 上。
+174 项测试覆盖：认证（含微信登录与账号注销）、衣物增删改查、批量上传核对流程、搭配 collage 校验、日记快照、推荐引擎、上传安全、限流、天气与 AI 接口——全部运行在内存 SQLite 上。
 
 ## 生产部署
 

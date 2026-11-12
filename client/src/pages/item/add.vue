@@ -21,6 +21,7 @@ import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
 import PrivacyPopup from '@/components/PrivacyPopup.vue'
 
 const editId = ref(null)      // 非空即编辑模式
+const needsReview = ref(false) // 批量导入、还没核对过的衣物：保存时一并确认（needs_review → false）
 const imageUrl = ref('')      // 上传成功后的服务器地址（提交用）
 const previewPath = ref('')   // 本地预览路径（选图后立即显示）
 const uploading = ref(false)
@@ -118,7 +119,10 @@ onLoad(async (query = {}) => {
     const data = await get(`/api/items/${editId.value}`)
     imageUrl.value = data.image_url || ''
     previewPath.value = data.image_url || ''
-    form.value.type = data.type || ''
+    needsReview.value = !!data.needs_review
+    if (needsReview.value) uni.setNavigationBarTitle({ title: '核对衣物' })
+    // 「未分类」不是可选类别，清空让用户必须选一个
+    form.value.type = data.type === '未分类' ? '' : (data.type || '')
     form.value.color = data.color || ''
     form.value.season = data.season || ''
     form.value.occasion = data.occasion || ''
@@ -287,13 +291,15 @@ async function submit() {
       remark: form.value.remark
     }
 
+    if (needsReview.value) payload.needs_review = false
+
     if (editId.value) {
       await put(`/api/items/${editId.value}`, payload)
     } else {
       await post('/api/items', payload)
     }
 
-    uni.showToast({ title: editId.value ? '保存成功' : '添加成功', icon: 'success' })
+    uni.showToast({ title: needsReview.value ? '已确认入库' : (editId.value ? '保存成功' : '添加成功'), icon: 'success' })
     // 等 toast 显示一下再返回上一页（列表页 onShow 会自动刷新）
     setTimeout(() => uni.navigateBack(), 600)
   } catch (e) {
@@ -306,6 +312,12 @@ async function submit() {
 
 <template>
   <view class="container">
+    <!-- 批量导入的衣物：提示核对 -->
+    <view v-if="needsReview" class="review-tip">
+      这件是批量添加的，信息由 AI 识别，可能不准。核对一下类型、颜色和季节，
+      顺便补上备注，点底部按钮就会正式进入衣橱。
+    </view>
+
     <!-- 图片 -->
     <view class="card">
       <view class="label">衣物照片 <text class="required">*</text></view>
@@ -424,7 +436,7 @@ async function submit() {
     </view>
 
     <button class="btn-primary" :disabled="submitting || uploading || cutting || recognizing || deleting" @click="submit">
-      {{ submitting ? '提交中...' : (editId ? '保存修改' : '确认入库') }}
+      {{ submitting ? '提交中...' : (needsReview ? '确认无误，入库' : (editId ? '保存修改' : '确认入库')) }}
     </button>
     <button
       v-if="editId"
@@ -438,6 +450,16 @@ async function submit() {
 </template>
 
 <style scoped>
+.review-tip {
+  margin-bottom: 24rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: #fff5f8;
+  border: 2rpx dashed #ffc4d6;
+  font-size: 24rpx;
+  color: #c0607f;
+  line-height: 1.6;
+}
 .required {
   color: #e05c5c;
   font-size: 26rpx;

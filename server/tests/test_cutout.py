@@ -14,8 +14,10 @@ URL = '/api/ai/cutout'
 @pytest.fixture(autouse=True)
 def _reset_rate_limit():
     ai_services._cutout_calls.clear()
+    ai_services._cutout_daily_calls.clear()
     yield
     ai_services._cutout_calls.clear()
+    ai_services._cutout_daily_calls.clear()
 
 
 @pytest.fixture
@@ -102,12 +104,24 @@ def test_reject_broken_file(client, auth_header, user, folder):
     mocked.assert_not_called()
 
 
-def test_rate_limit(client, auth_header, user, folder):
+def test_rate_limit(app, client, auth_header, user, folder):
+    app.config['AI_CUTOUT_LIMIT_PER_HOUR'] = 3
     image = _own_photo(folder, user.id)
     with patch.object(ai_services.CutoutService, '_remove_background', side_effect=_fake_cutout):
-        for _ in range(ai_services.CUTOUT_RATE_LIMIT):
+        for _ in range(3):
             assert _post(client, auth_header, image)['code'] == 0
         assert _post(client, auth_header, image)['code'] == 8004
+
+
+def test_daily_limit(app, client, auth_header, user, folder):
+    app.config['AI_CUTOUT_LIMIT_PER_HOUR'] = 10
+    app.config['AI_CUTOUT_LIMIT_PER_DAY'] = 2
+    image = _own_photo(folder, user.id)
+    with patch.object(ai_services.CutoutService, '_remove_background', side_effect=_fake_cutout):
+        for _ in range(2):
+            assert _post(client, auth_header, image)['code'] == 0
+        body = _post(client, auth_header, image)
+        assert body['code'] == 8004 and '今天' in body['msg']
 
 
 # ---------------- 只保留主体 ----------------

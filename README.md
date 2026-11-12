@@ -11,7 +11,7 @@
 ![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)
 ![uni-app](https://img.shields.io/badge/uni--app-cross--platform-2B9939)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
-![Tests](https://img.shields.io/badge/pytest-143%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/pytest-174%20passing-brightgreen)
 
 <!-- TODO(shary): 补一张产品主视觉/手机样机图，建议放 docs/screenshots/hero.png
 <p align="center">
@@ -21,7 +21,7 @@
 
 ## Highlights
 
-- **AI-powered item entry** — upload a photo and it is automatically processed: local background removal (rembg, `isnet-general-use`, runs on CPU) followed by attribute recognition (type / color / season / occasion) via a Qwen vision-language model; results are validated against backend enums before filling the form.
+- **AI-powered batch item entry** — pick up to 30 photos at once; each one is uploaded, background-removed locally (rembg, `isnet-general-use`, runs on CPU) and recognized (type / color / season / occasion) by a Qwen vision-language model, with results validated against backend enums. Items are saved immediately as *pending review* ("save first, fix later"), so users only correct what the AI got wrong. The pipeline runs two photos concurrently with per-photo progress, falls back gracefully (original image if cutout fails, *Unclassified* if recognition fails), resumes from the failed step after a network drop without re-uploading or re-spending AI quota, and is protected by hourly + daily per-user AI quotas.
 - **Manual outfit canvas** — drag, scale, and layer wardrobe items into a collage (`collage` JSON: position, width, z-index per item); the exact layout is persisted with both saved outfits and diary entries, and rendered back pixel-perfect.
 - **Explainable rule-based recommendations** — daily 3-outfit suggestions filtered by live temperature → season mapping, occasion matching, shoe/outerwear pairing, with down-weighting of items worn in the last 7 days; every suggestion ships with a human-readable reason string.
 - **Lightweight wear diary & timeline** — one tap to log today's outfit; mood emoji, one-line note and an optional photo are all optional. Timeline groups entries by month with per-date filtering; snapshots keep deleted garments visible in history.
@@ -31,12 +31,14 @@
 
 <table>
   <tr>
+    <td><img src="docs/screenshots/batch.png" width="200"/></td>
     <td><img src="docs/screenshots/recommend.png" width="200"/></td>
     <td><img src="docs/screenshots/wardrobe.png" width="200"/></td>
     <td><img src="docs/screenshots/canvas.png" width="200"/></td>
     <td><img src="docs/screenshots/timeline.png" width="200"/></td>
   </tr>
   <tr>
+    <td align="center">Batch AI upload</td>
     <td align="center">Daily recommendation</td>
     <td align="center">Wardrobe</td>
     <td align="center">Outfit canvas</td>
@@ -53,7 +55,7 @@
 | Database | MySQL (utf8mb4 / InnoDB) via PyMySQL |
 | AI | Qwen VL (DashScope) for clothing recognition; rembg for on-device-server background removal |
 | External API | QWeather (real-time weather for temperature-aware recommendations) |
-| Testing | pytest — 143 tests on in-memory SQLite, no live DB required |
+| Testing | pytest — 174 tests on in-memory SQLite, no live DB required |
 | Deployment | gunicorn (1×8) behind nginx; systemd unit & daily mysqldump backup in `deploy/` |
 
 ## Architecture
@@ -137,7 +139,7 @@ Optional `.env` keys unlock extra features: `DASHSCOPE_API_KEY` (AI recognition)
 cd server && python -m pytest -q
 ```
 
-143 tests cover auth (incl. WeChat login & account deletion), item CRUD, outfit collage validation, wear-log snapshots, the recommendation engine, upload security, rate limiting, weather, and AI endpoints — all against in-memory SQLite.
+174 tests cover auth (incl. WeChat login & account deletion), item CRUD, the batch-upload review flow, outfit collage validation, wear-log snapshots, the recommendation engine, upload security, rate limiting, weather, and AI endpoints — all against in-memory SQLite.
 
 ## Production Deployment
 

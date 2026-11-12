@@ -16,7 +16,7 @@ from typing import Any, Dict, List, Optional, Set
 
 from app.common.errors import ApiError
 from app.extensions import db
-from app.models.item import Item
+from app.models.item import Item, UNCLASSIFIED_TYPE
 from app.models.wear_log import WearLog
 from app.modules.item.services import ALLOWED_OCCASIONS
 
@@ -48,6 +48,7 @@ class RecommendService:
             Item.deleted_at.is_(None),
             Item.status == '正常',
             Item.season.in_(seasons + [ALL_SEASON]),
+            Item.type != UNCLASSIFIED_TYPE,   # 类别未确认的衣物不参与推荐
         )
         if occ:
             query = query.filter(db.or_(Item.occasion == occ, Item.occasion.is_(None)))

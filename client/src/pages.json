@@ -29,6 +29,14 @@
       }
     },
     {
+      "path": "pages/item/batch",
+      "style": {
+        "navigationBarTitleText": "批量添加",
+        "navigationBarBackgroundColor": "#FFF8F5",
+        "backgroundColor": "#FFF8F5"
+      }
+    },
+    {
       "path": "pages/outfit/canvas",
       "style": {
         "navigationBarTitleText": "手动搭配",

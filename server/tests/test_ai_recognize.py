@@ -12,8 +12,10 @@ URL = '/api/ai/recognize-item'
 @pytest.fixture(autouse=True)
 def _reset_rate_limit():
     ai_services._calls.clear()
+    ai_services._daily_calls.clear()
     yield
     ai_services._calls.clear()
+    ai_services._daily_calls.clear()
 
 
 @pytest.fixture
@@ -110,9 +112,38 @@ def test_reject_bad_image(client, auth_header, user, configured, image_url):
     mocked.assert_not_called()
 
 
-def test_rate_limit(client, auth_header, user, configured):
+def test_default_limits_fit_batch_upload(app):
+    # 批量上传一次二三十件，默认每小时额度要够用，且 24 小时总量大于每小时额度
+    assert app.config['AI_RECOGNIZE_LIMIT_PER_HOUR'] >= 50
+    assert app.config['AI_RECOGNIZE_LIMIT_PER_DAY'] > app.config['AI_RECOGNIZE_LIMIT_PER_HOUR']
+
+
+def test_rate_limit_per_hour(app, client, auth_header, user, configured):
+    app.config['AI_RECOGNIZE_LIMIT_PER_HOUR'] = 3
     image = _own_image(configured, user.id)
     with _mock_model('{"type":"上装","color":null,"season":null,"occasion":null}'):
-        for _ in range(ai_services.RATE_LIMIT):
+        for _ in range(3):
             assert _post(client, auth_header, image)['code'] == 0
-        assert _post(client, auth_header, image)['code'] == 8004
+        body = _post(client, auth_header, image)
+        assert body['code'] == 8004 and '太频繁' in body['msg']
+
+
+def test_rate_limit_per_day(app, client, auth_header, user, configured, monkeypatch):
+    # 每小时 2 次、24 小时 3 次：过了一小时可以继续识别，但 24 小时总量用完后提示明天再来
+    app.config['AI_RECOGNIZE_LIMIT_PER_HOUR'] = 2
+    app.config['AI_RECOGNIZE_LIMIT_PER_DAY'] = 3
+    now = [1_000_000.0]
+    monkeypatch.setattr(ai_services.time, 'time', lambda: now[0])
+    image = _own_image(configured, user.id)
+    with _mock_model('{"type":"上装","color":null,"season":null,"occasion":null}'):
+        assert _post(client, auth_header, image)['code'] == 0
+        assert _post(client, auth_header, image)['code'] == 0
+        assert _post(client, auth_header, image)['code'] == 8004          # 小时额度用完
+
+        now[0] += 3601                                                  # 一小时后
+        assert _post(client, auth_header, image)['code'] == 0
+        body = _post(client, auth_header, image)
+        assert body['code'] == 8004 and '今天' in body['msg']            # 24 小时额度用完
+
+        now[0] += 24 * 3600                                             # 第二天恢复
+        assert _post(client, auth_header, image)['code'] == 0
