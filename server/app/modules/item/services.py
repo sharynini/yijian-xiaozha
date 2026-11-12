@@ -3,12 +3,16 @@
 衣物业务逻辑层
 只处理业务规则，不处理 HTTP 请求/响应
 """
+import os
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.common.errors import ApiError
-from app.common.media import to_storage_path
+from app.common import image_fingerprint
+from app.common.media import UPLOAD_PREFIX, to_public_url, to_storage_path
+from flask import current_app
+
 from app.extensions import db
 from app.models.item import Item, UNCLASSIFIED_TYPE
 from app.models.outfit import Outfit, OutfitItem
@@ -47,6 +51,7 @@ class ItemService:
         ItemService._apply_fields(item, data, is_create=True)
         if not item.season:
             item.season = '全季'
+        ItemService.refresh_fingerprint(item)
 
         db.session.add(item)
         db.session.commit()
@@ -121,7 +126,10 @@ class ItemService:
         if 'type' in data:
             ItemService._validate_required({**data, 'image_url': data.get('image_url', item.image_url)})
 
+        old_image = item.image_url
         ItemService._apply_fields(item, data, is_create=False)
+        if item.image_url != old_image:      # 换了照片（重新上传 / 编辑页一键抠图）才需要重算
+            ItemService.refresh_fingerprint(item)
 
         db.session.commit()
         return item
@@ -236,6 +244,103 @@ class ItemService:
                 confirmed.append(item.id)
         db.session.commit()
         return {'confirmed': confirmed, 'skipped_unclassified': skipped}
+
+    # ---------------- 重复照片检测 ----------------
+    @staticmethod
+    def _local_image_path(image_url: Optional[str]) -> Optional[str]:
+        """本站上传图片 → 磁盘路径；外部链接、文件不存在时返回 None"""
+        if not isinstance(image_url, str) or not image_url.startswith(UPLOAD_PREFIX):
+            return None
+        filename = image_url[len(UPLOAD_PREFIX):]
+        if not filename or '/' in filename or '\\' in filename:
+            return None
+        full = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        return full if os.path.isfile(full) else None
+
+    @staticmethod
+    def refresh_fingerprint(item: Item) -> None:
+        """按当前图片重算指纹（不提交事务）"""
+        path = ItemService._local_image_path(item.image_url)
+        item.image_fp = image_fingerprint.compute(path) if path else None
+
+    @staticmethod
+    def _thresholds() -> Tuple[int, float]:
+        cfg = current_app.config
+        return int(cfg.get('DUPLICATE_MAX_HASH_DISTANCE', 10)), float(cfg.get('DUPLICATE_MAX_COLOR_DISTANCE', 16))
+
+    @staticmethod
+    def _fingerprint_pool(user_id: int) -> List[Tuple[int, str]]:
+        """本人所有未删除、有指纹的衣物：[(id, image_fp)]"""
+        rows = db.session.query(Item.id, Item.image_fp).filter(
+            Item.user_id == user_id, Item.deleted_at.is_(None), Item.image_fp.isnot(None),
+        ).all()
+        return [(r.id, r.image_fp) for r in rows]
+
+    @staticmethod
+    def _nearest(fp: Optional[str], pool: List[Tuple[int, str]], exclude_id: Optional[int],
+                 limit: int) -> List[int]:
+        """在 pool 里找与 fp 相似的衣物 ID，按相似程度排序"""
+        if not fp:
+            return []
+        max_hash, max_color = ItemService._thresholds()
+        hits = []
+        for other_id, other_fp in pool:
+            if other_id == exclude_id:
+                continue
+            d = image_fingerprint.distance(fp, other_fp)
+            if d and d[0] <= max_hash and d[1] <= max_color:
+                hits.append((d[0] + d[1] / 4, other_id))   # 综合距离，仅用于排序
+        return [i for _, i in sorted(hits)[:limit]]
+
+    @staticmethod
+    def find_duplicates(user_id: int, item: Item, limit: int = 3) -> List[Dict[str, Any]]:
+        """
+        与这件衣物照片相似的其他衣物（本人、未删除），最多 limit 件
+        :return: [{ item_id, image_url, type, color }]
+        """
+        ids = ItemService._nearest(item.image_fp, ItemService._fingerprint_pool(user_id), item.id, limit)
+        if not ids:
+            return []
+        by_id = {it.id: it for it in Item.query.filter(Item.id.in_(ids)).all()}
+        return [
+            {'item_id': i, 'image_url': to_public_url(by_id[i].image_url),
+             'type': by_id[i].type, 'color': by_id[i].color}
+            for i in ids if i in by_id
+        ]
+
+    @staticmethod
+    def duplicate_map(user_id: int, items: List[Item]) -> Dict[int, int]:
+        """
+        列表用：给「待确认」的衣物找最相似的一件已有衣物
+        :return: { 待确认衣物 ID: 最相似的衣物 ID }（没有相似的不出现）
+        """
+        pending = [it for it in items if it.needs_review and it.image_fp]
+        if not pending:
+            return {}
+        pool = ItemService._fingerprint_pool(user_id)
+        result = {}
+        for it in pending:
+            ids = ItemService._nearest(it.image_fp, pool, it.id, 1)
+            if ids:
+                result[it.id] = ids[0]
+        return result
+
+    @staticmethod
+    def backfill_fingerprints(only_missing: bool = True) -> Tuple[int, int]:
+        """
+        给已有衣物补算指纹（命令行 flask backfill-image-fp 调用）
+        :return: (处理的衣物数, 成功算出指纹的数量)
+        """
+        query = Item.query.filter(Item.deleted_at.is_(None))
+        if only_missing:
+            query = query.filter(Item.image_fp.is_(None))
+        total = done = 0
+        for item in query.all():
+            total += 1
+            ItemService.refresh_fingerprint(item)
+            done += item.image_fp is not None
+        db.session.commit()
+        return total, done
 
     # ---------------- 内部：字段校验与赋值 ----------------
     @staticmethod

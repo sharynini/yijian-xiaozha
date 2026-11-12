@@ -22,6 +22,7 @@ import PrivacyPopup from '@/components/PrivacyPopup.vue'
 
 const editId = ref(null)      // 非空即编辑模式
 const needsReview = ref(false) // 批量导入、还没核对过的衣物：保存时一并确认（needs_review → false）
+const duplicates = ref([])     // 照片和这件很像的已有衣物（后端按图片指纹比对），核对时提示
 const imageUrl = ref('')      // 上传成功后的服务器地址（提交用）
 const previewPath = ref('')   // 本地预览路径（选图后立即显示）
 const uploading = ref(false)
@@ -120,6 +121,7 @@ onLoad(async (query = {}) => {
     imageUrl.value = data.image_url || ''
     previewPath.value = data.image_url || ''
     needsReview.value = !!data.needs_review
+    duplicates.value = data.duplicates || []
     if (needsReview.value) uni.setNavigationBarTitle({ title: '核对衣物' })
     // 「未分类」不是可选类别，清空让用户必须选一个
     form.value.type = data.type === '未分类' ? '' : (data.type || '')
@@ -214,12 +216,18 @@ function clearAiMark(field) {
   }
 }
 
+function previewDuplicate(d) {
+  uni.previewImage({ urls: [d.image_url, imageUrl.value].filter(Boolean), current: 0 })
+}
+
 // ---------- 删除（仅编辑模式） ----------
-function removeItem() {
+function removeItem(asDuplicate = false) {
   if (!editId.value || deleting.value) return
   uni.showModal({
-    title: '删除衣物',
-    content: '确定删除这件衣物吗？删除后衣橱里不再显示，已有的穿搭日记不受影响。',
+    title: asDuplicate ? '删除重复的这件' : '删除衣物',
+    content: asDuplicate
+      ? '衣橱里已经有这件了，删除当前这件（原来那件保留）？'
+      : '确定删除这件衣物吗？删除后衣橱里不再显示，已有的穿搭日记不受影响。',
     confirmText: '删除',
     confirmColor: '#e05c5c',
     success: async (res) => {
@@ -316,6 +324,21 @@ async function submit() {
     <view v-if="needsReview" class="review-tip">
       这件是批量添加的，信息由 AI 识别，可能不准。核对一下类型、颜色和季节，
       顺便补上备注，点底部按钮就会正式进入衣橱。
+    </view>
+
+    <!-- 可能重复：只在核对批量导入的衣物时提示 -->
+    <view v-if="needsReview && duplicates.length" class="dup-card">
+      <view class="dup-title">这件和衣橱里已有的衣服很像，是重复上传了吗？</view>
+      <view class="dup-list">
+        <view v-for="d in duplicates" :key="d.item_id" class="dup-item" @click="previewDuplicate(d)">
+          <image class="dup-img" :src="d.image_url" mode="aspectFit" />
+          <text class="dup-label">{{ d.type }}{{ d.color ? ' · ' + d.color : '' }}</text>
+        </view>
+      </view>
+      <view class="dup-actions">
+        <text class="dup-btn danger" @click="removeItem(true)">是重复的，删除这件</text>
+        <text class="dup-hint">不是的话，直接往下核对就行</text>
+      </view>
     </view>
 
     <!-- 图片 -->
@@ -442,7 +465,7 @@ async function submit() {
       v-if="editId"
       class="btn-danger"
       :disabled="submitting || deleting"
-      @click="removeItem"
+      @click="removeItem(false)"
     >{{ deleting ? '删除中...' : '删除衣物' }}</button>
     <view v-if="!editId" class="bottom-tip">照片会先上传到服务器，再提交衣物信息</view>
     <PrivacyPopup />
@@ -450,6 +473,57 @@ async function submit() {
 </template>
 
 <style scoped>
+.dup-card {
+  margin-bottom: 24rpx;
+  padding: 20rpx 24rpx;
+  border-radius: 16rpx;
+  background: #fff8ee;
+  border: 2rpx dashed #f5c27a;
+}
+.dup-title {
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #b8691b;
+}
+.dup-list {
+  display: flex;
+  gap: 16rpx;
+  margin-top: 16rpx;
+}
+.dup-item {
+  width: 160rpx;
+}
+.dup-img {
+  width: 160rpx;
+  height: 160rpx;
+  border-radius: 12rpx;
+  background: #fff;
+}
+.dup-label {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 20rpx;
+  color: #8a7a80;
+  text-align: center;
+}
+.dup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 16rpx;
+}
+.dup-btn.danger {
+  padding: 8rpx 20rpx;
+  border-radius: 999rpx;
+  background: #e05c5c;
+  color: #fff;
+  font-size: 22rpx;
+  font-weight: 700;
+}
+.dup-hint {
+  font-size: 20rpx;
+  color: #a4949a;
+}
 .review-tip {
   margin-bottom: 24rpx;
   padding: 20rpx 24rpx;

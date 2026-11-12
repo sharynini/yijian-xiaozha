@@ -64,7 +64,9 @@ def create_item():
     data = request.get_json(silent=True) or {}
 
     item = ItemService.create(user_id=user_id, data=data)
-    return success(data=item.to_dict(), msg='添加成功')
+    # duplicates：照片与已有衣物相似时返回最多 3 件，前端提示「可能重复」
+    return success(data={**item.to_dict(), 'duplicates': ItemService.find_duplicates(user_id, item)},
+                   msg='添加成功')
 
 
 @item_bp.get('')
@@ -90,11 +92,13 @@ def list_items():
         per_page=per_page,
     )
 
+    dup = ItemService.duplicate_map(user_id, items)
     return success(data={
         'total': total,
         'page': page,
         'per_page': per_page,
-        'list': [item.to_dict() for item in items],
+        # 待确认的衣物附带 duplicate_of：最相似的已有衣物 ID（没有则为 null），衣橱卡片显示「可能重复」
+        'list': [{**item.to_dict(), 'duplicate_of': dup.get(item.id)} for item in items],
         # 待确认数量（不受筛选条件影响），衣橱页据此提示「有 N 件待确认」
         'pending_review': ItemService.count_pending_review(user_id),
     })
@@ -110,7 +114,7 @@ def get_item(item_id: int):
     """
     user_id = _current_user_id()
     item = ItemService.get_item(user_id=user_id, item_id=item_id)
-    return success(data=item.to_dict())
+    return success(data={**item.to_dict(), 'duplicates': ItemService.find_duplicates(user_id, item)})
 
 
 @item_bp.put('/<int:item_id>')

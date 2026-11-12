@@ -51,6 +51,7 @@ CREATE TABLE `item` (
     `status`          VARCHAR(20)         NOT NULL DEFAULT '正常' COMMENT '状态：正常/洗衣中/收纳中',
     `remark`          TEXT                DEFAULT NULL COMMENT '备注',
     `wear_count`      INT UNSIGNED        NOT NULL DEFAULT 0 COMMENT '累计穿着次数',
+    `image_fp`        VARCHAR(120)        NULL     COMMENT '图片指纹（dHash:颜色签名），用于提示可能重复的衣物；外部图片或无法解析时为空',
     `needs_review`    TINYINT(1)          NOT NULL DEFAULT 0 COMMENT '是否待确认：批量上传后 AI 自动填写、用户尚未核对',
     `created_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at`      DATETIME            NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',

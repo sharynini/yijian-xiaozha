@@ -31,7 +31,7 @@ const STATUS_TEXT = {
   failed: '失败'
 }
 
-const tasks = ref([])         // { key, localPath, preview, status, msg, imageUrl, type, cutDone, ai }
+const tasks = ref([])         // { key, localPath, preview, status, msg, imageUrl, type, cutDone, ai, dup }
 const running = ref(0)        // 正在处理的数量
 let seq = 0
 let aiStopped = false         // 识别被限流（8004）后，本批剩下的不再调识别，直接存「未分类」
@@ -43,6 +43,7 @@ const failedCount = computed(() => tasks.value.filter((t) => t.status === 'faile
 const finishedCount = computed(() => doneCount.value + failedCount.value)
 const busy = computed(() => finishedCount.value < total.value)
 const percent = computed(() => (total.value ? Math.round((finishedCount.value / total.value) * 100) : 0))
+const dupCount = computed(() => tasks.value.filter((t) => t.status === 'done' && t.dup).length)
 const unclassifiedCount = computed(
   () => tasks.value.filter((t) => t.status === 'done' && t.type === UNCLASSIFIED).length
 )
@@ -143,7 +144,9 @@ async function processOne(task) {
     task.status = 'saving'
     const payload = { image_url: task.imageUrl, type: ai.type || UNCLASSIFIED, needs_review: true }
     ;['color', 'season', 'occasion'].forEach((k) => { if (ai[k]) payload[k] = ai[k] })
-    await post('/api/items', payload, { silent: true })
+    const saved = await post('/api/items', payload, { silent: true })
+    // 后端按图片指纹比对，和衣橱里已有的照片很像时返回 duplicates
+    task.dup = !!(saved && saved.duplicates && saved.duplicates.length)
     task.type = payload.type
     task.status = 'done'
     task.msg = task.aiMsg || task.cutMsg || ''
@@ -208,6 +211,9 @@ function startNewBatch() {
           已入库 {{ doneCount }} 件<text v-if="failedCount">，失败 {{ failedCount }} 件</text>
           <text v-if="unclassifiedCount">，其中 {{ unclassifiedCount }} 件需要手动选类别</text>
         </view>
+        <view v-if="!busy && dupCount" class="summary dup">
+          有 {{ dupCount }} 张和衣橱里已有的照片很像，核对时可以顺手删掉重复的
+        </view>
         <view v-else class="summary muted">处理时请不要离开本页面</view>
       </view>
 
@@ -216,6 +222,7 @@ function startNewBatch() {
           <image class="thumb" :src="t.preview" mode="aspectFit" />
           <view class="badge" :class="t.status">{{ STATUS_TEXT[t.status] }}</view>
           <view v-if="t.status === 'done'" class="cell-type">{{ t.type }}</view>
+          <view v-if="t.dup" class="cell-dup">可能重复</view>
           <view v-if="t.msg" class="cell-msg">{{ t.status === 'failed' ? t.msg + '，点击重试' : t.msg }}</view>
         </view>
         <view v-if="total < MAX_PER_BATCH" class="cell add-cell" @click="choosePhotos">
@@ -251,6 +258,8 @@ function startNewBatch() {
 .bar-inner { height: 100%; border-radius: 999rpx; background: #ff8fb1; transition: width 0.3s; }
 .summary { margin-top: 14rpx; font-size: 24rpx; color: #4a3f44; }
 .summary.muted { color: #a4949a; }
+.summary.dup { color: #d9822b; }
+.cell-dup { position: absolute; left: 10rpx; top: 48rpx; padding: 2rpx 12rpx; border-radius: 999rpx; font-size: 20rpx; color: #fff; background: #f0a04b; }
 .grid { display: flex; flex-wrap: wrap; gap: 18rpx; }
 .cell { position: relative; width: calc((100% - 36rpx) / 3); height: 260rpx; border-radius: 16rpx; background: #fff; overflow: hidden; box-sizing: border-box; }
 .thumb { width: 100%; height: 100%; }

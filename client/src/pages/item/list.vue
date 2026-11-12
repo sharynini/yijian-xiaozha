@@ -531,6 +531,7 @@ function cardTags(item) {
               <view class="thumb">
                 <SafeImage :src="item.image_url" />
                 <view v-if="item.needs_review" class="review-badge">待确认</view>
+                <view v-if="item.duplicate_of" class="dup-badge">可能重复</view>
                 <view v-if="selecting" class="check" :class="{ on: selected[item.item_id] }">
                   <text v-if="selected[item.item_id]">✓</text>
                 </view>
@@ -732,6 +733,17 @@ function cardTags(item) {
 }
 .thumb {
   position: relative;
+}
+.dup-badge {
+  position: absolute;
+  left: 8rpx;
+  top: 52rpx;
+  padding: 2rpx 12rpx;
+  border-radius: 999rpx;
+  background: #f0a04b;
+  color: #fff;
+  font-size: 20rpx;
+  font-weight: 700;
 }
 .review-badge {
   position: absolute;

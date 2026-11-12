@@ -11,7 +11,7 @@
 ![Vue](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)
 ![uni-app](https://img.shields.io/badge/uni--app-cross--platform-2B9939)
 ![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
-![Tests](https://img.shields.io/badge/pytest-218%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/pytest-227%20passing-brightgreen)
 
 <!-- TODO(shary): 补一张产品主视觉/手机样机图，建议放 docs/screenshots/hero.png
 <p align="center">
@@ -22,6 +22,7 @@
 ## Highlights
 
 - **AI-powered batch item entry** — pick up to 30 photos at once; each one is uploaded, background-removed locally (rembg, `isnet-general-use`, runs on CPU) and recognized (type / color / season / occasion) by a Qwen vision-language model, with results validated against backend enums. Items are saved immediately as *pending review* ("save first, fix later"), so users only correct what the AI got wrong. The pipeline runs two photos concurrently with per-photo progress, falls back gracefully (original image if cutout fails, *Unclassified* if recognition fails), resumes from the failed step after a network drop without re-uploading or re-spending AI quota, and is protected by hourly + daily per-user AI quotas.
+- **Duplicate photo detection** — every item image gets a lightweight fingerprint (64-bit dHash for shape + a 4×4 color grid, computed on the white-composited, content-cropped cutout using only Pillow). Shape alone confused e.g. black wide-leg trousers with a grey pleated skirt, so both distances must be small. On 281 real clothing photos, a re-uploaded copy (half size, JPEG q60, 2% crop) is caught ~96% of the time, while only 4 of 39,340 distinct-photo pairs are flagged (one of which is a genuine duplicate file). Likely duplicates are badged in the batch page and wardrobe, and the review page offers one-tap removal.
 - **Wardrobe multi-select** — enter selection mode via a *Manage* button or a long press (implemented on raw touch events so list scrolling is never blocked); batch-delete in one transaction with an impact preview ("2 of these items are in 3 saved outfits") and a 5-second undo backed by soft deletes, plus batch-confirm of pending items that skips *Unclassified* ones.
 - **Manual outfit canvas** — drag, scale, and layer wardrobe items into a collage (`collage` JSON: position, width, z-index per item); the exact layout is persisted with both saved outfits and diary entries, and rendered back pixel-perfect.
 - **Explainable rule-based recommendations** — daily 3-outfit suggestions filtered by live temperature → season mapping, occasion matching, shoe/outerwear pairing, with down-weighting of items worn in the last 7 days; every suggestion ships with a human-readable reason string.
@@ -56,7 +57,7 @@
 | Database | MySQL (utf8mb4 / InnoDB) via PyMySQL |
 | AI | Qwen VL (DashScope) for clothing recognition; rembg for on-device-server background removal |
 | External API | QWeather (real-time weather for temperature-aware recommendations) |
-| Testing | pytest — 218 tests on in-memory SQLite, no live DB required |
+| Testing | pytest — 227 tests on in-memory SQLite, no live DB required |
 | Deployment | gunicorn (1×8) behind nginx; systemd unit & daily mysqldump backup in `deploy/` |
 
 ## Architecture
@@ -140,7 +141,7 @@ Optional `.env` keys unlock extra features: `DASHSCOPE_API_KEY` (AI recognition)
 cd server && python -m pytest -q
 ```
 
-218 tests cover auth (incl. WeChat login & account deletion), item CRUD, the batch-upload review flow, batch delete / undo / confirm, outfit collage validation, wear-log snapshots, the recommendation engine, upload security, rate limiting, weather, and AI endpoints — all against in-memory SQLite.
+227 tests cover auth (incl. WeChat login & account deletion), item CRUD, the batch-upload review flow, batch delete / undo / confirm, duplicate-photo detection, outfit collage validation, wear-log snapshots, the recommendation engine, upload security, rate limiting, weather, and AI endpoints — all against in-memory SQLite.
 
 ## Production Deployment
 

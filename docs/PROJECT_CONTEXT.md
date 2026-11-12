@@ -131,7 +131,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 |------|------|----------|-------------|
 | POST | `/api/items` | 必填 `image_url`、`type`；可选 `color`、`season`、`occasion`、`material`、`brand`、`price`、`purchase_date`、`status`、`remark` | `Item.to_dict()` |
 | GET | `/api/items` | Query：`type`、`color`、`season`（可选，等值 AND）；`needs_review`（选填，1/true 只看待确认，0/false 只看已确认）；`page`（默认 1）、`per_page`（默认 10，最大 50） | `{ total, page, per_page, list, pending_review }`（`pending_review` 为待确认总数，不受筛选影响） |
-| GET | `/api/items/<item_id>` | — | `Item.to_dict()` |
+| GET | `/api/items/<item_id>` | — | `Item.to_dict()` + `duplicates`（最多 3 件相似衣物） |
 | PUT | `/api/items/<item_id>` | 部分更新，字段同创建白名单 | `Item.to_dict()` |
 | DELETE | `/api/items/<item_id>` | — | 软删除 |
 | POST | `/api/items/batch-delete` | `{ids:[...]}`（≤100，忽略他人/已删除） | `{deleted:[...]}`，单事务软删除 |
@@ -256,7 +256,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 
 ### 3.0 迁移
 
-- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage` → `e7b9d1f3a5c6_add_item_needs_review`
+- 迁移链：`82555c282131_baseline` → `0b71cec01715_sync_wear_log_outfit_id_comment` → `a1a163ff1dc8_add_wear_log_collage` → `c3e5a7d9b1f2_add_user_openid` → `d4f6b8a0c2e3_add_outfit_collage` → `e7b9d1f3a5c6_add_item_needs_review` → `f2a4c6e8b0d2_add_item_image_fp`
 - 已有库升级：`cd server && flask db upgrade`（需已加载 `server/.env`；具体 `FLASK_APP` 设置：待确认）
 - 新建库：执行 `schema.sql`（已与最新迁移同步），再执行 `flask db stamp head`
 - 改模型后：`flask db migrate -m "说明"` 生成脚本，检查后 `flask db upgrade`
@@ -290,6 +290,7 @@ JWT：需鉴权接口使用 `@jwt_required()`，请求头 `Authorization: Bearer
 | status | VARCHAR(20) NOT NULL DEFAULT '正常' | 正常/洗衣中/收纳中 |
 | remark | TEXT NULL | |
 | wear_count | INT UNSIGNED DEFAULT 0 | 记录日记时可 +1 |
+| image_fp | VARCHAR(120) NULL | 图片指纹 `dHash16hex:颜色96hex`，新增/换图时计算，`flask backfill-image-fp` 补算；用于「可能重复」（阈值 `DUPLICATE_MAX_HASH_DISTANCE`=10、`DUPLICATE_MAX_COLOR_DISTANCE`=16） |
 | needs_review | TINYINT(1) NOT NULL DEFAULT 0 | 待确认（批量上传后未核对）；索引 `idx_user_review(user_id, needs_review)` |
 | created_at / updated_at / deleted_at | DATETIME | 软删除 |
 
@@ -494,6 +495,6 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-12 共 218 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-12 共 227 项通过）
 5. 本机试跑生产模式：`cd server && GUNICORN_BIND=127.0.0.1:5002 venv/bin/gunicorn -c gunicorn.conf.py wsgi:app`
 6. 上线部署：见 `deploy/README.md`
