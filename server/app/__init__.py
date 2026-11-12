@@ -148,7 +148,20 @@ def create_app(config_name: str = 'default') -> Flask:
     register_error_handlers(app)
     register_jwt_handlers(jwt)
 
+    _register_cli(app)
+
     if config_name == 'production':
         _check_production_config(app)
 
     return app
+
+
+def _register_cli(app: Flask) -> None:
+    """命令行工具：flask <命令>"""
+
+    @app.cli.command('backfill-image-fp')
+    def backfill_image_fp():
+        """给还没有图片指纹的衣物补算指纹（重复照片检测上线后执行一次）"""
+        from app.modules.item.services import ItemService
+        total, done = ItemService.backfill_fingerprints()
+        print(f'处理 {total} 件衣物，成功计算 {done} 件指纹（其余为外部图片或文件缺失）')

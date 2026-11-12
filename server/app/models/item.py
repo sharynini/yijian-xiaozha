@@ -42,6 +42,8 @@ class Item(db.Model):
     status = db.Column(db.String(20), nullable=False, default='正常', server_default='正常', comment='状态：正常/洗衣中/收纳中')
     remark = db.Column(db.Text, nullable=True, comment='备注')
     wear_count = db.Column(db.Integer, nullable=False, default=0, server_default='0', comment='累计穿着次数')
+    image_fp = db.Column(db.String(120), nullable=True,
+                         comment='图片指纹（dHash:颜色签名），用于提示可能重复的衣物；外部图片或无法解析时为空')
     needs_review = db.Column(db.Boolean, nullable=False, default=False, server_default=db.text('0'),
                              comment='是否待确认：批量上传后 AI 自动填写、用户尚未核对')
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow,

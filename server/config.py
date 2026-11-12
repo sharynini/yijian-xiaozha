@@ -70,6 +70,9 @@ class Config:
     # 上传图片：最长边超过该值会等比缩小；每用户每小时上传张数上限
     UPLOAD_MAX_SIDE = 2048
     UPLOAD_RATE_LIMIT_PER_HOUR = int(os.getenv('UPLOAD_RATE_LIMIT_PER_HOUR') or 150)
+    # 重复照片检测阈值（见 app/common/image_fingerprint.py 的实验说明）
+    DUPLICATE_MAX_HASH_DISTANCE = int(os.getenv('DUPLICATE_MAX_HASH_DISTANCE') or 10)
+    DUPLICATE_MAX_COLOR_DISTANCE = float(os.getenv('DUPLICATE_MAX_COLOR_DISTANCE') or 16)
     # AI 识别 / 抠图的按用户限流（每小时 + 24 小时总量），批量上传需要较宽的每小时额度
     AI_RECOGNIZE_LIMIT_PER_HOUR = int(os.getenv('AI_RECOGNIZE_LIMIT_PER_HOUR') or 100)
     AI_RECOGNIZE_LIMIT_PER_DAY = int(os.getenv('AI_RECOGNIZE_LIMIT_PER_DAY') or 300)
