@@ -3,7 +3,7 @@
 衣物业务逻辑层
 只处理业务规则，不处理 HTTP 请求/响应
 """
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -11,12 +11,18 @@ from app.common.errors import ApiError
 from app.common.media import to_storage_path
 from app.extensions import db
 from app.models.item import Item, UNCLASSIFIED_TYPE
+from app.models.outfit import Outfit, OutfitItem
 
 # 允许的字段取值（与 schema.sql 注释保持一致）
 ALLOWED_TYPES = {'上装', '下装', '连衣裙', '外套', '鞋子', '包包', '帽子', '配饰'}
 ALLOWED_SEASONS = {'春', '夏', '秋', '冬', '全季'}
 ALLOWED_OCCASIONS = {'日常', '工作', '运动', '正式'}
 ALLOWED_STATUS = {'正常', '洗衣中', '收纳中'}
+
+# 批量操作一次最多处理的衣物数
+BATCH_MAX_IDS = 100
+# 删除后可撤销的时间窗口：超过这个时间的删除不能再通过「撤销」恢复
+RESTORE_WINDOW = timedelta(minutes=10)
 
 # 可写入的字段白名单
 EDITABLE_FIELDS = (
@@ -130,6 +136,106 @@ class ItemService:
         item = ItemService.get_item(user_id, item_id)
         item.deleted_at = datetime.utcnow()
         db.session.commit()
+
+    # ---------------- 批量操作 ----------------
+    @staticmethod
+    def parse_ids(raw: Any) -> List[int]:
+        """
+        校验批量操作的 ids：必须是非空列表、元素为正整数、不超过 BATCH_MAX_IDS；去重并保持顺序
+        :raises ApiError: 2002 参数错误
+        """
+        if not isinstance(raw, list) or not raw:
+            raise ApiError('请至少选择一件衣物', code=2002)
+        ids: List[int] = []
+        for v in raw:
+            # bool 是 int 的子类，单独排除
+            if isinstance(v, bool) or not isinstance(v, (int, str)):
+                raise ApiError('衣物 ID 不合法', code=2002)
+            try:
+                n = int(v)
+            except ValueError:
+                raise ApiError('衣物 ID 不合法', code=2002)
+            if n <= 0:
+                raise ApiError('衣物 ID 不合法', code=2002)
+            if n not in ids:
+                ids.append(n)
+        if len(ids) > BATCH_MAX_IDS:
+            raise ApiError(f'一次最多操作 {BATCH_MAX_IDS} 件衣物', code=2002)
+        return ids
+
+    @staticmethod
+    def batch_delete(user_id: int, ids: List[int]) -> List[int]:
+        """
+        批量软删除：只删本人、未删除的衣物；别人的或已删除的 ID 直接忽略
+        一个事务内完成，要么全部删除，要么都不删
+        :return: 实际删除的衣物 ID（前端用于「撤销」）
+        """
+        items = Item.query.filter(
+            Item.user_id == user_id, Item.id.in_(ids), Item.deleted_at.is_(None)
+        ).all()
+        now = datetime.utcnow()
+        for item in items:
+            item.deleted_at = now
+        db.session.commit()
+        return [item.id for item in items]
+
+    @staticmethod
+    def restore(user_id: int, ids: List[int]) -> List[int]:
+        """
+        撤销删除：只恢复本人在 RESTORE_WINDOW 内删除的衣物
+        :return: 实际恢复的衣物 ID
+        """
+        since = datetime.utcnow() - RESTORE_WINDOW
+        items = Item.query.filter(
+            Item.user_id == user_id, Item.id.in_(ids),
+            Item.deleted_at.isnot(None), Item.deleted_at >= since,
+        ).all()
+        for item in items:
+            item.deleted_at = None
+        db.session.commit()
+        return [item.id for item in items]
+
+    @staticmethod
+    def delete_impact(user_id: int, ids: List[int]) -> Dict[str, int]:
+        """
+        删除前的影响预估：选中的衣物出现在多少套（本人、未删除的）搭配里
+        :return: { items_in_outfits: 涉及的衣物件数, outfits: 受影响的搭配套数 }
+        """
+        rows = (
+            db.session.query(OutfitItem.item_id, OutfitItem.outfit_id)
+            .join(Outfit, Outfit.id == OutfitItem.outfit_id)
+            .join(Item, Item.id == OutfitItem.item_id)
+            .filter(
+                OutfitItem.item_id.in_(ids),
+                Item.user_id == user_id, Item.deleted_at.is_(None),
+                Outfit.user_id == user_id, Outfit.deleted_at.is_(None),
+            )
+            .all()
+        )
+        return {
+            'items_in_outfits': len({r.item_id for r in rows}),
+            'outfits': len({r.outfit_id for r in rows}),
+        }
+
+    @staticmethod
+    def batch_confirm(user_id: int, ids: List[int]) -> Dict[str, Any]:
+        """
+        批量确认待确认的衣物（needs_review → false）
+        「未分类」的必须先选类别，跳过并返回数量；不是本人 / 已删除 / 本来就已确认的忽略
+        """
+        items = Item.query.filter(
+            Item.user_id == user_id, Item.id.in_(ids),
+            Item.deleted_at.is_(None), Item.needs_review.is_(True),
+        ).all()
+        confirmed, skipped = [], []
+        for item in items:
+            if item.type == UNCLASSIFIED_TYPE:
+                skipped.append(item.id)
+            else:
+                item.needs_review = False
+                confirmed.append(item.id)
+        db.session.commit()
+        return {'confirmed': confirmed, 'skipped_unclassified': skipped}
 
     # ---------------- 内部：字段校验与赋值 ----------------
     @staticmethod
