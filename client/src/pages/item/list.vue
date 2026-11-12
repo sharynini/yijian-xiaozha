@@ -7,10 +7,12 @@
  *   - 左滑出现「删除」按钮（软删除 DELETE /api/items/<id>）
  *   - 点击卡片进入编辑页
  *   - 顶部「衣物 | 搭配」切换：搭配标签显示 OutfitList（我的搭配），下拉刷新 / 上拉加载转交给它
+ *   - 多选：点「管理」或长按卡片进入；可批量删除（删前提示涉及的搭配，删后 5 秒内可撤销），
+ *           在「待确认」里还可批量确认入库。全选只作用于已加载出来的衣物（列表是分页的）
  */
 import { ref, computed } from 'vue'
 import { onShow, onPullDownRefresh, onReachBottom } from '@dcloudio/uni-app'
-import { get, del } from '@/utils/request'
+import { get, post, del } from '@/utils/request'
 import { ITEM_TYPES, SEASONS, OCCASIONS, COLORS } from '@/utils/constants'
 import TaotaoSprite from '@/components/TaotaoSprite.vue'
 import AppTabBar from '@/components/AppTabBar.vue'
@@ -23,6 +25,7 @@ const outfitListRef = ref(null)
 
 function switchTab(next) {
   if (tab.value === next) return
+  exitSelect()
   tab.value = next
   if (next === 'outfits') outfitListRef.value && outfitListRef.value.reload()
 }
@@ -111,6 +114,7 @@ function reload() {
 
 function selectType(cat) {
   if (!reviewMode.value && currentType.value === cat.value) return
+  exitSelect()
   reviewMode.value = false
   currentType.value = cat.value
   reload()
@@ -118,6 +122,7 @@ function selectType(cat) {
 
 function openReview() {
   if (reviewMode.value) return
+  exitSelect()
   reviewMode.value = true
   currentType.value = ''
   reload()
@@ -137,12 +142,14 @@ function resetDraft() {
 }
 
 function applyFilter() {
+  exitSelect()
   filters.value = { ...draft.value }
   showFilter.value = false
   reload()
 }
 
 function clearChip(key) {
+  exitSelect()
   filters.value[key] = ''
   reload()
 }
@@ -193,6 +200,9 @@ function closeOthers(except) {
 }
 
 function onTouchStart(e, item) {
+  // 长按自己计时实现：uni 的 @longpress 在 H5 上会拦截触摸，导致整个列表无法滑动
+  startPress(e, item)
+  if (selecting.value) return
   closeOthers(item)
   startX = e.touches[0].clientX
   startY = e.touches[0].clientY
@@ -203,6 +213,9 @@ function onTouchStart(e, item) {
 function onTouchMove(e, item) {
   const dx = e.touches[0].clientX - startX
   const dy = e.touches[0].clientY - startY
+  // 手指移动超过 10px 就不算长按（是在滑动列表或左滑）
+  if (Math.abs(dx) > 10 || Math.abs(dy) > 10) cancelPress()
+  if (selecting.value) return
   // 纵向意图优先，交给页面滚动处理
   if (Math.abs(dy) > Math.abs(dx)) return
 
@@ -213,7 +226,8 @@ function onTouchMove(e, item) {
 }
 
 function onTouchEnd(item) {
-  if (item._offset === undefined) return
+  cancelPress()
+  if (selecting.value || item._offset === undefined) return
   // 划过一半就吸附展开，否则回弹
   item._offset = item._offset < -DEL_WIDTH / 2 ? -DEL_WIDTH : 0
 }
@@ -237,8 +251,172 @@ function removeItem(item) {
   })
 }
 
+// ---------- 多选：批量删除 / 撤销 / 批量确认 ----------
+const selecting = ref(false)
+const selected = ref({})          // { [item_id]: true }
+const batchBusy = ref(false)
+let suppressClick = false
+let pressTimer = null
+const LONG_PRESS_MS = 500
+
+function startPress(e, item) {
+  cancelPress()
+  if (selecting.value) return
+  // 多选状态下 onTouchStart 会提前 return，这里单独记一次起点，供 onTouchMove 判断是否移动
+  startX = e.touches[0].clientX
+  startY = e.touches[0].clientY
+  pressTimer = setTimeout(() => {
+    pressTimer = null
+    onLongPress(item)
+  }, LONG_PRESS_MS)
+}
+
+function cancelPress() {
+  if (pressTimer) {
+    clearTimeout(pressTimer)
+    pressTimer = null
+  }
+}
+
+const selectedIds = computed(() =>
+  items.value.filter((i) => selected.value[i.item_id]).map((i) => i.item_id)
+)
+const allSelected = computed(() => items.value.length > 0 && selectedIds.value.length === items.value.length)
+
+function enterSelect() {
+  closeOthers(null)
+  selected.value = {}
+  selecting.value = true
+}
+
+function exitSelect() {
+  selecting.value = false
+  selected.value = {}
+}
+
+function toggleSelect(item) {
+  selected.value = { ...selected.value, [item.item_id]: !selected.value[item.item_id] }
+}
+
+/** 长按卡片：进入多选并选中这一件（像手机相册） */
+function onLongPress(item) {
+  if (selecting.value || item._offset) return
+  enterSelect()
+  selected.value = { [item.item_id]: true }
+  suppressClick = true
+  setTimeout(() => { suppressClick = false }, 600)
+  uni.vibrateShort && uni.vibrateShort({ fail: () => {} })
+}
+
+function toggleAll() {
+  if (allSelected.value) {
+    selected.value = {}
+    return
+  }
+  const next = {}
+  items.value.forEach((i) => { next[i.item_id] = true })
+  selected.value = next
+}
+
+async function batchDelete() {
+  const ids = selectedIds.value
+  if (!ids.length || batchBusy.value) return
+
+  // 删除前查一下影响范围；查失败不阻塞删除，只是不显示这句提示
+  let impactText = ''
+  try {
+    const impact = await post('/api/items/delete-impact', { ids }, { silent: true })
+    if (impact && impact.outfits) {
+      impactText = `其中 ${impact.items_in_outfits} 件在你保存的 ${impact.outfits} 套搭配里，删除后这些搭配会少掉它们。`
+    }
+  } catch (e) { /* 忽略 */ }
+
+  uni.showModal({
+    title: `删除 ${ids.length} 件衣物`,
+    content: `${impactText}已有的穿搭日记不受影响，删除后 5 秒内可以撤销。`,
+    confirmText: '删除',
+    confirmColor: '#e05c5c',
+    success: async (res) => {
+      if (!res.confirm) return
+      batchBusy.value = true
+      try {
+        const data = await post('/api/items/batch-delete', { ids })
+        exitSelect()
+        await reload()
+        showUndo(data.deleted || [])
+      } catch (e) {
+        // 统一错误提示
+      } finally {
+        batchBusy.value = false
+      }
+    }
+  })
+}
+
+async function batchConfirm() {
+  const ids = selectedIds.value
+  if (!ids.length || batchBusy.value) return
+  batchBusy.value = true
+  try {
+    const data = await post('/api/items/batch-confirm', { ids })
+    const ok = (data.confirmed || []).length
+    const skipped = (data.skipped_unclassified || []).length
+    exitSelect()
+    await reload()
+    if (skipped) {
+      uni.showModal({
+        title: `已确认 ${ok} 件`,
+        content: `还有 ${skipped} 件是「未分类」，需要点开选好类别后才能确认。`,
+        showCancel: false,
+        confirmColor: '#ff8fb1'
+      })
+    } else {
+      uni.showToast({ title: `已确认 ${ok} 件`, icon: 'success' })
+    }
+  } catch (e) {
+    // 统一错误提示
+  } finally {
+    batchBusy.value = false
+  }
+}
+
+// ---------- 撤销 ----------
+const UNDO_MS = 5000
+const undoIds = ref([])
+let undoTimer = null
+
+function showUndo(ids) {
+  if (!ids.length) return
+  clearTimeout(undoTimer)
+  undoIds.value = ids
+  undoTimer = setTimeout(() => { undoIds.value = [] }, UNDO_MS)
+}
+
+async function undoDelete() {
+  const ids = undoIds.value
+  if (!ids.length) return
+  clearTimeout(undoTimer)
+  undoIds.value = []
+  try {
+    const data = await post('/api/items/restore', { ids })
+    await reload()
+    uni.showToast({ title: `已恢复 ${(data.restored || []).length} 件`, icon: 'none' })
+  } catch (e) {
+    // 统一错误提示
+  }
+}
+
 // ---------- 跳转 ----------
 function onCardClick(item) {
+  // 长按刚进入多选时，松手还会触发一次 click，忽略掉，避免把刚选中的又取消
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  if (selecting.value) {
+    toggleSelect(item)
+    return
+  }
   if (dragged) {
     dragged = false
     return
@@ -271,7 +449,7 @@ function cardTags(item) {
 </script>
 
 <template>
-  <view class="page" :style="{ paddingTop: statusPad + 'px' }">
+  <view class="page" :class="{ 'with-bar': selecting || undoIds.length }" :style="{ paddingTop: statusPad + 'px' }">
     <view v-if="spinning" class="spin-mask">
       <TaotaoSprite mood="spin" :size="140" />
     </view>
@@ -320,6 +498,10 @@ function cardTags(item) {
 
       <!-- 右侧内容 -->
       <view class="main">
+        <view v-if="items.length" class="toolbar">
+          <text class="toolbar-count">共 {{ total }} 件</text>
+          <text class="toolbar-btn" @click="selecting ? exitSelect() : enterSelect()">{{ selecting ? '完成' : '管理' }}</text>
+        </view>
         <view v-if="reviewMode" class="review-banner on">
           点开每件衣服核对信息，确认后就会正式进入衣橱
         </view>
@@ -336,7 +518,7 @@ function cardTags(item) {
         </view>
 
         <view class="grid">
-          <view v-for="item in items" :key="item.item_id" class="cell">
+          <view v-for="item in items" :key="item.item_id" class="cell" :class="{ picked: selecting && selected[item.item_id] }">
             <view class="cell-del" :style="{ width: DEL_WIDTH + 'px' }" @click="removeItem(item)">删除</view>
             <view
               class="cell-body press-bounce"
@@ -349,6 +531,9 @@ function cardTags(item) {
               <view class="thumb">
                 <SafeImage :src="item.image_url" />
                 <view v-if="item.needs_review" class="review-badge">待确认</view>
+                <view v-if="selecting" class="check" :class="{ on: selected[item.item_id] }">
+                  <text v-if="selected[item.item_id]">✓</text>
+                </view>
               </view>
               <view class="tags">
                 <text v-for="tag in cardTags(item)" :key="tag.key" class="tag" :class="tag.cls">{{ tag.text }}</text>
@@ -378,7 +563,7 @@ function cardTags(item) {
       </view>
     </view>
 
-    <view v-if="tab === 'items'" class="fab press-bounce" @click="goAdd">
+    <view v-if="tab === 'items' && !selecting" class="fab press-bounce" @click="goAdd">
       <text class="tee">👕</text>
     </view>
 
@@ -407,11 +592,130 @@ function cardTags(item) {
       </view>
     </view>
 
+    <!-- 多选操作栏 -->
+    <view v-if="selecting" class="select-bar">
+      <text class="select-all" @click="toggleAll">
+        {{ allSelected ? '取消全选' : '全选（已加载 ' + items.length + ' 件）' }}
+      </text>
+      <view class="select-actions">
+        <view
+          v-if="reviewMode"
+          class="bar-btn confirm"
+          :class="{ off: !selectedIds.length || batchBusy }"
+          @click="batchConfirm"
+        >确认入库</view>
+        <view
+          class="bar-btn danger"
+          :class="{ off: !selectedIds.length || batchBusy }"
+          @click="batchDelete"
+        >删除{{ selectedIds.length ? '（' + selectedIds.length + '）' : '' }}</view>
+      </view>
+    </view>
+
+    <!-- 撤销条 -->
+    <view v-else-if="undoIds.length" class="undo-bar">
+      <text>已删除 {{ undoIds.length }} 件</text>
+      <text class="undo-btn" @click="undoDelete">撤销</text>
+    </view>
+
     <AppTabBar current="closet" />
   </view>
 </template>
 
 <style scoped>
+/* ---------- 多选 ---------- */
+.page.with-bar {
+  padding-bottom: 300rpx;
+}
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0 0 12rpx;
+  padding: 0 4rpx;
+}
+.toolbar-count {
+  font-size: 22rpx;
+  color: #a4949a;
+}
+.toolbar-btn {
+  padding: 6rpx 22rpx;
+  border-radius: 999rpx;
+  font-size: 24rpx;
+  color: #ff8fb1;
+  background: #fff5f8;
+  border: 2rpx solid #ffc4d6;
+}
+.cell.picked .cell-body {
+  border-color: #ff8fb1;
+  box-shadow: 0 0 0 4rpx rgba(255, 143, 177, 0.35);
+}
+.check {
+  position: absolute;
+  right: 10rpx;
+  top: 10rpx;
+  width: 40rpx;
+  height: 40rpx;
+  line-height: 40rpx;
+  text-align: center;
+  border-radius: 50%;
+  border: 3rpx solid #fff;
+  background: rgba(74, 63, 68, 0.25);
+  color: #fff;
+  font-size: 24rpx;
+  font-weight: 700;
+  box-sizing: border-box;
+}
+.check.on {
+  background: #ff8fb1;
+}
+.select-bar,
+.undo-bar {
+  position: fixed;
+  left: 20rpx;
+  right: 20rpx;
+  bottom: calc(140rpx + env(safe-area-inset-bottom));
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18rpx 24rpx;
+  border-radius: 24rpx;
+  background: #fffdfb;
+  box-shadow: 0 8rpx 30rpx rgba(255, 150, 175, 0.25);
+  font-size: 26rpx;
+  color: #4a3f44;
+}
+.select-all {
+  font-size: 24rpx;
+  color: #8a7f88;
+}
+.select-actions {
+  display: flex;
+  gap: 16rpx;
+}
+.bar-btn {
+  padding: 12rpx 28rpx;
+  border-radius: 999rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+  color: #fff;
+}
+.bar-btn.danger { background: #e05c5c; }
+.bar-btn.confirm { background: #7cc49a; }
+.bar-btn.off {
+  opacity: 0.4;
+  pointer-events: none;
+}
+.undo-bar {
+  background: #4a3f44;
+  color: #fff;
+}
+.undo-btn {
+  color: #ffb3c9;
+  font-weight: 700;
+}
+
 /* ---------- 待确认 ---------- */
 .review-banner {
   margin: 0 0 16rpx;
