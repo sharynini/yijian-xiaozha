@@ -89,3 +89,53 @@ def test_recommend_skips_unclassified_but_keeps_pending(client, auth_header, use
     data = client.get('/api/recommend', query_string={'temperature': 18}, headers=auth_header).get_json()['data']
     assert data['total_candidates'] == 2
     assert [it['item_id'] for it in data['list'][0]['items']] == [top.id, bottom.id]
+
+
+# ---------------- 端到端：模拟前端批量添加 → 核对的完整请求 ----------------
+def _confirm_payload(**overrides):
+    """与 client/src/pages/item/add.vue 的 submit() 发出的字段完全一致（空字段是空串 / null）"""
+    payload = {
+        'image_url': '/uploads/a_cutout.png', 'type': '', 'color': '', 'season': '',
+        'occasion': '', 'material': '', 'brand': '', 'price': None, 'remark': '',
+        'needs_review': False,
+    }
+    payload.update(overrides)
+    return payload
+
+
+def test_batch_then_review_flow(client, auth_header):
+    # 1. 批量页：一张识别成功、一张识别失败（存「未分类」）
+    recognized = _create(client, auth_header, image_url='/uploads/a_cutout.png', type='上装',
+                         color='白色', season='夏', needs_review=True)['data']
+    unknown = _create(client, auth_header, image_url='/uploads/b.jpg', type='未分类',
+                      needs_review=True)['data']
+
+    listing = client.get('/api/items', headers=auth_header).get_json()['data']
+    assert listing['pending_review'] == 2
+
+    # 2. 核对识别成功的：改一下颜色、加备注后确认
+    body = _update(client, auth_header, recognized['item_id'],
+                   **_confirm_payload(type='上装', color='米色', season='夏', remark='通勤穿'))
+    assert body['code'] == 0
+    assert body['data']['needs_review'] is False
+    assert body['data']['color'] == '米色' and body['data']['remark'] == '通勤穿'
+
+    # 3. 「未分类」那件：前端会清空类别，没选就提交 → 后端拒绝（类型不能为空）
+    assert _update(client, auth_header, unknown['item_id'], **_confirm_payload())['code'] == 2002
+
+    # 选好类别后确认成功
+    body = _update(client, auth_header, unknown['item_id'],
+                   **_confirm_payload(image_url='/uploads/b.jpg', type='鞋子', season='全季'))
+    assert body['code'] == 0 and body['data']['type'] == '鞋子'
+
+    # 4. 都核对完：待确认清零，待确认列表为空
+    listing = client.get('/api/items', headers=auth_header).get_json()['data']
+    assert listing['pending_review'] == 0 and listing['total'] == 2
+    pending = client.get('/api/items', query_string={'needs_review': 1}, headers=auth_header).get_json()['data']
+    assert pending['total'] == 0
+
+
+def test_other_user_cannot_confirm(client, auth_header, other_user):
+    foreign = make_item(other_user.id, type='未分类', needs_review=True)
+    body = _update(client, auth_header, foreign.id, **_confirm_payload(type='上装', season='夏'))
+    assert body['code'] == 2001

@@ -8,7 +8,8 @@
  * 全部处理完后到衣橱的「待确认」里逐件核对、补充备注。
  *
  * 容错：抠图失败用原图，识别失败存为「未分类」，都不算失败；
- *       只有上传或保存失败才标记失败，可单独重试，不影响其他照片。
+ *       上传 / 保存失败，或任何一步遇到断网，才标记失败，可单独重试，不影响其他照片。
+ *       重试时从断开的那一步接着做，已完成的步骤不重复（不会重复上传、重复消耗 AI 次数）。
  * 并发：同时处理 CONCURRENCY 张，避免一下子打满后端的 AI 限流。
  */
 import { ref, computed } from 'vue'
@@ -30,7 +31,7 @@ const STATUS_TEXT = {
   failed: '失败'
 }
 
-const tasks = ref([])         // { key, localPath, preview, status, msg, imageUrl, type }
+const tasks = ref([])         // { key, localPath, preview, status, msg, imageUrl, type, cutDone, ai }
 const running = ref(0)        // 正在处理的数量
 let seq = 0
 let aiStopped = false         // 识别被限流（8004）后，本批剩下的不再调识别，直接存「未分类」
@@ -48,6 +49,11 @@ const unclassifiedCount = computed(
 
 onUnload(() => { leaving = true })
 
+/** 断网 / 超时：uni 的 fail 回调只带 errMsg，没有后端返回的业务 code */
+function isNetworkError(e) {
+  return !(e && typeof e.code !== 'undefined')
+}
+
 function choosePhotos() {
   const left = MAX_PER_BATCH - total.value
   if (left <= 0) {
@@ -55,15 +61,21 @@ function choosePhotos() {
     return
   }
   uni.chooseImage({
-    count: Math.min(PICK_LIMIT, left),
+    // 不按剩余张数限制 count：uni 在 H5 上会按 count 悄悄截断，用户不知道多选的去哪了。
+    // 统一按单次上限选，超出剩余名额的部分在下面截掉并提示
+    count: PICK_LIMIT,
     sizeType: ['compressed'],
     sourceType: ['album', 'camera'],
     success: (res) => {
-      const paths = (res.tempFilePaths || []).slice(0, left)
+      const picked = res.tempFilePaths || []
+      const paths = picked.slice(0, left)
+      if (picked.length > left) {
+        uni.showToast({ title: `一批最多 ${MAX_PER_BATCH} 张，只加入了前 ${left} 张`, icon: 'none', duration: 2500 })
+      }
       paths.forEach((p) => {
         tasks.value.push({
           key: ++seq, localPath: p, preview: p,
-          status: 'waiting', msg: '', imageUrl: '', type: ''
+          status: 'waiting', msg: '', imageUrl: '', type: '', cutDone: false, ai: null
         })
       })
       pump()
@@ -94,27 +106,38 @@ async function processOne(task) {
       task.imageUrl = up.url
     }
 
-    // 2. 抠图：失败就用原图
-    task.status = 'cutting'
-    try {
-      const cut = await post('/api/ai/cutout', { image_url: task.imageUrl }, { silent: true })
-      task.imageUrl = cut.url
-      task.preview = cut.url
-    } catch (e) {
-      task.msg = '未去背景'
+    // 2. 抠图：后端处理失败就用原图；断网则整张标记失败，重试时再抠
+    if (!task.cutDone) {
+      task.status = 'cutting'
+      try {
+        const cut = await post('/api/ai/cutout', { image_url: task.imageUrl }, { silent: true })
+        task.imageUrl = cut.url
+        task.preview = cut.url
+      } catch (e) {
+        if (isNetworkError(e)) throw e
+        task.cutMsg = '未去背景'
+      }
+      task.cutDone = true
     }
 
-    // 3. 识别：失败或被限流就存「未分类」
-    let ai = {}
-    if (!aiStopped) {
-      task.status = 'recognizing'
-      try {
-        ai = (await post('/api/ai/recognize-item', { image_url: task.imageUrl }, { silent: true })) || {}
-      } catch (e) {
-        if (e && e.code === 8004) aiStopped = true
-        task.msg = (e && e.code === 8004) ? 'AI 次数用完，待手动分类' : '未识别，待手动分类'
+    // 3. 识别：后端识别失败或被限流就存「未分类」；断网同上
+    if (!task.ai) {
+      if (aiStopped) {
+        task.ai = {}
+        task.aiMsg = 'AI 次数用完，待手动分类'
+      } else {
+        task.status = 'recognizing'
+        try {
+          task.ai = (await post('/api/ai/recognize-item', { image_url: task.imageUrl }, { silent: true })) || {}
+        } catch (e) {
+          if (isNetworkError(e)) throw e
+          if (e.code === 8004) aiStopped = true
+          task.ai = {}
+          task.aiMsg = e.code === 8004 ? 'AI 次数用完，待手动分类' : '未识别，待手动分类'
+        }
       }
     }
+    const ai = task.ai
 
     // 4. 保存为待确认
     task.status = 'saving'
@@ -123,9 +146,10 @@ async function processOne(task) {
     await post('/api/items', payload, { silent: true })
     task.type = payload.type
     task.status = 'done'
+    task.msg = task.aiMsg || task.cutMsg || ''
   } catch (e) {
     task.status = 'failed'
-    task.msg = (e && e.msg) || '网络异常'
+    task.msg = isNetworkError(e) ? '网络断开' : (e.msg || '保存失败')
   }
 }
 
@@ -196,7 +220,7 @@ function startNewBatch() {
         </view>
         <view v-if="total < MAX_PER_BATCH" class="cell add-cell" @click="choosePhotos">
           <text class="picker-plus">＋</text>
-          <text class="add-tip">继续添加</text>
+          <text class="add-tip">继续添加（{{ total }}/{{ MAX_PER_BATCH }}）</text>
         </view>
       </view>
 
