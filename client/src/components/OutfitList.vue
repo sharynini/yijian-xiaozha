@@ -52,13 +52,41 @@ function reload() {
   return fetchList(true)
 }
 
+/** 原地刷新：重新拉取已加载的前几页，列表长度不变，从画布编辑页返回时停在原位置 */
+async function refreshInPlace() {
+  if (!loaded.value || page.value <= 1 || !list.value.length) return reload()
+  if (loading.value) return
+  loading.value = true
+  loadError.value = false
+  try {
+    const pages = await Promise.all(
+      Array.from({ length: page.value }, (_, i) =>
+        get('/api/outfits', { page: i + 1, per_page: PER_PAGE }, { skipDedup: true }))
+    )
+    const seen = new Set()
+    const merged = []
+    pages.forEach((d) => (d.list || []).forEach((o) => {
+      if (!seen.has(o.outfit_id)) {
+        seen.add(o.outfit_id)
+        merged.push(o)
+      }
+    }))
+    list.value = merged
+    total.value = pages[0].total || 0
+  } catch (e) {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
 function loadMore() {
   if (finished.value || loading.value) return
   page.value += 1
   fetchList(false)
 }
 
-defineExpose({ reload, loadMore })
+defineExpose({ reload, refreshInPlace, loadMore })
 
 // ---------- 卡片操作 ----------
 function onCardClick(outfit) {

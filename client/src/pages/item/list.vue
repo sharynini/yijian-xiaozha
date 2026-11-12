@@ -27,7 +27,23 @@ function switchTab(next) {
   if (tab.value === next) return
   exitSelect()
   tab.value = next
+  scrollToTop()
   if (next === 'outfits') outfitListRef.value && outfitListRef.value.reload()
+}
+
+/**
+ * 换了分类 / 筛选条件后回到顶部。
+ * 只重新加载列表时浏览器会保留原来的滚动位置：新列表够长就停在中间，不够长才被「挤」回顶部，
+ * 所以以前是「有时回到顶部、有时不回」
+ */
+function scrollToTop() {
+  uni.pageScrollTo({ scrollTop: 0, duration: 0 })
+}
+
+/** 换分类 / 筛选：先回顶部再加载 */
+function resetList() {
+  scrollToTop()
+  return reload()
 }
 
 // 左侧分类：value 为空表示「全部」
@@ -79,6 +95,17 @@ let startY = 0
 let dragged = false            // 本次触摸是否发生了横向拖动（用于抑制误触跳转）
 
 // ---------- 数据加载 ----------
+/** 当前分类 / 筛选条件下第 p 页的请求参数 */
+function buildParams(p) {
+  const params = { page: p, per_page: PER_PAGE }
+  if (currentType.value) params.type = currentType.value
+  if (reviewMode.value) params.needs_review = 1
+  Object.entries(filters.value).forEach(([k, v]) => {
+    if (v) params[k] = v
+  })
+  return params
+}
+
 async function fetchItems(reset = false) {
   if (loading.value) return
   // 上拉加载时若已到底则不再请求
@@ -87,14 +114,7 @@ async function fetchItems(reset = false) {
   loading.value = true
   loadError.value = false
   try {
-    const params = { page: page.value, per_page: PER_PAGE }
-    if (currentType.value) params.type = currentType.value
-    if (reviewMode.value) params.needs_review = 1
-    Object.entries(filters.value).forEach(([k, v]) => {
-      if (v) params[k] = v
-    })
-
-    const data = await get('/api/items', params)
+    const data = await get('/api/items', buildParams(page.value))
     total.value = data.total || 0
     pendingReview.value = data.pending_review || 0
     const list = data.list || []
@@ -112,12 +132,45 @@ function reload() {
   return fetchItems(true)
 }
 
+/**
+ * 原地刷新：重新拉取已加载的前 page 页，一次性替换列表。
+ * 用于从编辑页 / 其他 tab 返回：列表长度基本不变，页面停在原来的位置；
+ * 如果用 reload() 只剩第一页，列表变短，浏览器会把页面弹回顶部。
+ */
+async function refreshInPlace() {
+  if (!loaded.value || page.value <= 1 || !items.value.length) return reload()
+  if (loading.value) return
+  loading.value = true
+  loadError.value = false
+  try {
+    const pages = await Promise.all(
+      Array.from({ length: page.value }, (_, i) => get('/api/items', buildParams(i + 1), { skipDedup: true }))
+    )
+    total.value = pages[0].total || 0
+    pendingReview.value = pages[0].pending_review || 0
+    // 编辑 / 删除后衣物可能在页与页之间移动，按 ID 去重
+    const seen = new Set()
+    const merged = []
+    pages.forEach((d) => (d.list || []).forEach((it) => {
+      if (!seen.has(it.item_id)) {
+        seen.add(it.item_id)
+        merged.push(it)
+      }
+    }))
+    items.value = merged
+  } catch (e) {
+    loadError.value = true
+  } finally {
+    loading.value = false
+  }
+}
+
 function selectType(cat) {
   if (!reviewMode.value && currentType.value === cat.value) return
   exitSelect()
   reviewMode.value = false
   currentType.value = cat.value
-  reload()
+  resetList()
 }
 
 function openReview() {
@@ -125,7 +178,7 @@ function openReview() {
   exitSelect()
   reviewMode.value = true
   currentType.value = ''
-  reload()
+  resetList()
 }
 
 function openFilter() {
@@ -145,13 +198,13 @@ function applyFilter() {
   exitSelect()
   filters.value = { ...draft.value }
   showFilter.value = false
-  reload()
+  resetList()
 }
 
 function clearChip(key) {
   exitSelect()
   filters.value[key] = ''
-  reload()
+  resetList()
 }
 
 // ---------- 生命周期 ----------
@@ -163,11 +216,13 @@ onShow(() => {
       tab.value = 'items'
       reviewMode.value = true
       currentType.value = ''
+      resetList()
+      return
     }
   } catch (e) { /* 读不到标记就按普通方式刷新 */ }
-  // 从添加/编辑页、画布页返回或切回衣橱 tab 时刷新当前标签
-  if (tab.value === 'outfits') outfitListRef.value && outfitListRef.value.reload()
-  else reload()
+  // 从添加/编辑页、画布页返回或切回衣橱 tab 时刷新当前标签；衣物列表原地刷新，保持滚动位置
+  if (tab.value === 'outfits') outfitListRef.value && outfitListRef.value.refreshInPlace()
+  else refreshInPlace()
 })
 
 onPullDownRefresh(async () => {
@@ -342,7 +397,7 @@ async function batchDelete() {
       try {
         const data = await post('/api/items/batch-delete', { ids })
         exitSelect()
-        await reload()
+        await refreshInPlace()   // 批量操作后停在原位置
         showUndo(data.deleted || [])
       } catch (e) {
         // 统一错误提示
@@ -362,7 +417,7 @@ async function batchConfirm() {
     const ok = (data.confirmed || []).length
     const skipped = (data.skipped_unclassified || []).length
     exitSelect()
-    await reload()
+    await refreshInPlace()   // 批量操作后停在原位置
     if (skipped) {
       uni.showModal({
         title: `已确认 ${ok} 件`,
@@ -399,7 +454,7 @@ async function undoDelete() {
   undoIds.value = []
   try {
     const data = await post('/api/items/restore', { ids })
-    await reload()
+    await refreshInPlace()   // 批量操作后停在原位置
     uni.showToast({ title: `已恢复 ${(data.restored || []).length} 件`, icon: 'none' })
   } catch (e) {
     // 统一错误提示
