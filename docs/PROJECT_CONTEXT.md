@@ -337,8 +337,9 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 | path | 标题 | tabBar | 备注 |
 |------|------|--------|------|
 | pages/index/index | 今日推荐 | 首页 | 自定义导航栏 |
-| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏；顶部「衣物 / 搭配」标签 |
-| pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=` |
+| pages/item/list | 我的衣橱 | 衣橱 | 自定义导航栏；顶部「衣物 / 搭配」标签；左侧「待确认」（`needs_review=1`，数量取列表接口的 `pending_review`），批量页通过本地标记 `wardrobe_open_review` 跳入 |
+| pages/item/add | 添加衣物 | 否 | 编辑同页 `?id=`；待确认衣物显示为「核对衣物」，保存时一并提交 `needs_review:false`，「未分类」会被清空要求重选 |
+| pages/item/batch | 批量添加 | 否 | 各「添加衣物」入口默认进入；上传 → 抠图 → 识别 → 存为待确认，并发 2、单批 ≤30 张；断网可从失败步骤续传 |
 | pages/outfit/canvas | 手动搭配 | 否 | `?from=recommend` 载入推荐结果；`?outfit_id=` 载入已保存搭配（标题「编辑搭配」） |
 | pages/diary/create | 轻量日记 | 否 | |
 | pages/timeline/index | 穿搭日记 | 时间轴 | 自定义导航栏 |
@@ -489,6 +490,6 @@ tabBar 为自定义（`"custom": true`，组件 `components/AppTabBar.vue` + `cu
 1. MySQL 建库（默认 `smart_wardrobe`），执行 `schema.sql`，再执行迁移补齐字段（见 3.0）
 2. `server`：按 `.env.example` 手动创建并填写 `server/.env` → `pip install -r requirements.txt` → `python run.py`（5001）
 3. `client`：`npm i` → `npm run dev:h5`（8081）或 `npm run dev:mp-weixin`
-4. 测试：`cd server && python -m pytest -q`（2026-11-06 共 143 项通过）
+4. 测试：`cd server && python -m pytest -q`（2026-11-12 共 174 项通过）
 5. 本机试跑生产模式：`cd server && GUNICORN_BIND=127.0.0.1:5002 venv/bin/gunicorn -c gunicorn.conf.py wsgi:app`
 6. 上线部署：见 `deploy/README.md`

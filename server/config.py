@@ -110,7 +110,7 @@ class TestingConfig(Config):
     TRUST_PROXY = False
     SECRET_KEY = 'pytest-only-secret'
     PUBLIC_BASE_URL = ''  # 测试固定用请求域名，不受本机环境变量影响
-    JWT_SECRET_KEY = 'pytest-only-jwt-secret'
+    JWT_SECRET_KEY = 'pytest-only-jwt-secret-at-least-32-bytes'
     SQLALCHEMY_DATABASE_URI = 'sqlite://'
     SQLALCHEMY_ENGINE_OPTIONS = {
         'connect_args': {'check_same_thread': False},
